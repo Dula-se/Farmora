@@ -1,18 +1,22 @@
 {
   "expo": {
-    "name": "famora",
-    "slug": "famora",
+    "name": "Farmora",
+    "slug": "farmora",
     "version": "1.0.0",
+    "description": "Farmora - Smart Agriculture & Farming Platform",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "famora",
+    "scheme": "farmora",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.farmora.app",
+      "supportsTablet": true
     },
     "android": {
+      "package": "com.farmora.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1E5E3A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -28,9 +32,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#3E623E",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 104
         }
       ]
     ],

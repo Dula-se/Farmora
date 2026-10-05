@@ -31,13 +31,16 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
 *.tsbuildinfo
 
-example
+# backend
+backend/dist/
+backend/uploads/*
+!backend/uploads/.gitkeep
+!backend/uploads/*/.gitkeep
+backend/.env
 
-# generated native folders
-/ios
-/android
