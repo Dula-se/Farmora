@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -12,12 +13,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
+import { ImageGalleryModal } from './image-gallery-modal';
+import { PriceTrendsModal } from './price-trends-modal';
+import { SavedToWishlistModal } from './wishlist-screen';
 
 interface ProductDetailScreenProps {
   product: ApiProduceItem;
   onBack: () => void;
   onOrderNow?: (product: ApiProduceItem, quantity: number) => void;
   onChatFarmer?: (farmerId: string) => void;
+  onOpenReviews?: (product: ApiProduceItem) => void;
+  onOpenSimilar?: (product: ApiProduceItem) => void;
+  onOpenCompare?: (product: ApiProduceItem) => void;
+  onOpenFarmMap?: (product: ApiProduceItem) => void;
+  onOpenWishlist?: () => void;
 }
 
 export function ProductDetailScreen({
@@ -25,10 +34,18 @@ export function ProductDetailScreen({
   onBack,
   onOrderNow,
   onChatFarmer,
+  onOpenReviews,
+  onOpenSimilar,
+  onOpenCompare,
+  onOpenFarmMap,
+  onOpenWishlist,
 }: ProductDetailScreenProps) {
   const [selectedQty, setSelectedQty] = useState(product.minimumOrderQuantity || 10);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
+  const [showPriceTrends, setShowPriceTrends] = useState(false);
+  const [showSavedWishlistModal, setShowSavedWishlistModal] = useState(false);
 
   const minQty = product.minimumOrderQuantity || 1;
   const maxQty = product.availableQuantity || 500;
@@ -46,7 +63,18 @@ export function ProductDetailScreen({
     }
   };
 
+  const handleToggleFavorite = () => {
+    const nextState = !isFavorite;
+    setIsFavorite(nextState);
+    if (nextState) {
+      setShowSavedWishlistModal(true);
+    }
+  };
+
   const totalPrice = selectedQty * product.pricePerUnit;
+  const productImages = product.images && product.images.length > 0
+    ? product.images
+    : ['https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=800&auto=format&fit=crop&q=80'];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -61,8 +89,23 @@ export function ProductDetailScreen({
         </Pressable>
 
         <View style={styles.topRightActions}>
+          {/* Wishlist Link button */}
+          {onOpenWishlist && (
+            <Pressable
+              onPress={onOpenWishlist}
+              hitSlop={12}
+              style={styles.navBtn}>
+              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <Path d="M3 6h18" />
+                <Path d="M16 10a4 4 0 0 1-8 0" />
+              </Svg>
+            </Pressable>
+          )}
+
+          {/* Heart / Favorite button */}
           <Pressable
-            onPress={() => setIsFavorite(!isFavorite)}
+            onPress={handleToggleFavorite}
             hitSlop={12}
             style={styles.navBtn}>
             <Svg width={22} height={22} viewBox="0 0 24 24" fill={isFavorite ? '#DC2626' : 'none'} stroke={isFavorite ? '#DC2626' : '#1E293B'} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -75,20 +118,24 @@ export function ProductDetailScreen({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {/* Product Image */}
-        <View style={styles.imageContainer}>
-          {product.images && product.images[0] ? (
-            <Image
-              source={{ uri: product.images[0] }}
-              style={styles.productImage}
-              contentFit="cover"
-              transition={200}
-            />
-          ) : (
-            <View style={[styles.productImage, styles.placeholderBox]}>
-              <Text style={styles.placeholderEmoji}>🌱</Text>
-            </View>
-          )}
+        {/* Product Image (Tap to open Fullscreen Gallery) */}
+        <Pressable
+          style={styles.imageContainer}
+          onPress={() => setShowGallery(true)}>
+          <Image
+            source={{ uri: productImages[0] }}
+            style={styles.productImage}
+            contentFit="cover"
+            transition={200}
+          />
+
+          {/* Gallery Badge */}
+          <View style={styles.galleryBadge}>
+            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </Svg>
+            <Text style={styles.galleryBadgeText}>View Gallery ({productImages.length})</Text>
+          </View>
 
           {/* Badges Overlay */}
           <View style={styles.imageBadgesRow}>
@@ -101,16 +148,20 @@ export function ProductDetailScreen({
               <Text style={styles.freshBadgeText}>⚡ Fresh Harvest</Text>
             </View>
           </View>
-        </View>
+        </Pressable>
 
         <View style={styles.bodyContent}>
           {/* Title & Price Header */}
           <View style={styles.titleRow}>
             <View style={{ flex: 1, marginRight: 12 }}>
               <Text style={styles.productTitle}>{product.title}</Text>
-              <Text style={styles.locationText}>
-                📍 {product.locationCity}, {product.locationDistrict}
-              </Text>
+              <Pressable
+                style={styles.locationLink}
+                onPress={() => onOpenFarmMap?.(product)}>
+                <Text style={styles.locationText}>
+                  📍 {product.locationCity}, {product.locationDistrict} • <Text style={styles.mapLinkText}>View Map ↗</Text>
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.priceContainer}>
@@ -121,6 +172,43 @@ export function ProductDetailScreen({
               <Text style={styles.priceUnit}>per {unit}</Text>
             </View>
           </View>
+
+          {/* Price Trends & Wholesale Comparison Card Button */}
+          <Pressable
+            style={styles.priceTrendsCard}
+            onPress={() => setShowPriceTrends(true)}>
+            <View style={styles.priceTrendsLeft}>
+              <View style={styles.trendIconBubble}>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M23 6l-9.5 9.5-5-5L1 18" />
+                  <Path d="M17 6h6v6" />
+                </Svg>
+              </View>
+              <View>
+                <Text style={styles.priceTrendsHeading}>Wholesale Price Trends</Text>
+                <Text style={styles.priceTrendsSub}>Save Rs. 50/kg compared to Manning Market</Text>
+              </View>
+            </View>
+            <View style={styles.viewTrendsBadge}>
+              <Text style={styles.viewTrendsText}>View Graph ↗</Text>
+            </View>
+          </Pressable>
+
+          {/* Ratings & Reviews Summary Card (Tap to open Reviews Screen) */}
+          <Pressable
+            style={styles.reviewsSummaryCard}
+            onPress={() => onOpenReviews?.(product)}>
+            <View style={styles.reviewsSummaryLeft}>
+              <Text style={styles.bigRatingText}>4.8</Text>
+              <View style={styles.starsGroup}>
+                <Text style={styles.starIcons}>★★★★★</Text>
+                <Text style={styles.reviewCountText}>124 verified reviews</Text>
+              </View>
+            </View>
+            <View style={styles.reviewsSummaryRight}>
+              <Text style={styles.readReviewsText}>Read all reviews ›</Text>
+            </View>
+          </Pressable>
 
           {/* Key Specs Row */}
           <View style={styles.specsRow}>
@@ -140,6 +228,31 @@ export function ProductDetailScreen({
               <Text style={styles.specLabel}>Shelf Life</Text>
               <Text style={styles.specValue}>5 - 7 Days</Text>
             </View>
+          </View>
+
+          {/* Quick Shortcuts Bar: Compare | Similar Products */}
+          <View style={styles.shortcutsRow}>
+            {onOpenCompare && (
+              <Pressable
+                style={styles.shortcutBtn}
+                onPress={() => onOpenCompare(product)}>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </Svg>
+                <Text style={styles.shortcutBtnText}>Compare Produce</Text>
+              </Pressable>
+            )}
+
+            {onOpenSimilar && (
+              <Pressable
+                style={styles.shortcutBtn}
+                onPress={() => onOpenSimilar(product)}>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </Svg>
+                <Text style={styles.shortcutBtnText}>Similar Produce</Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Description Section */}
@@ -186,7 +299,9 @@ export function ProductDetailScreen({
               <Text style={styles.farmerLocation}>
                 {product.locationCity}, {product.locationDistrict}
               </Text>
-              <Text style={styles.farmerRating}>★ 4.9 (124 Orders completed)</Text>
+              <Pressable onPress={() => onOpenFarmMap?.(product)}>
+                <Text style={styles.farmerMapLink}>📍 18.4 km away • View on Map ›</Text>
+              </Pressable>
             </View>
 
             {onChatFarmer && (
@@ -253,6 +368,39 @@ export function ProductDetailScreen({
           </View>
         </Pressable>
       </View>
+
+      {/* Fullscreen Image Gallery Modal */}
+      <ImageGalleryModal
+        visible={showGallery}
+        images={productImages}
+        onClose={() => setShowGallery(false)}
+      />
+
+      {/* Price Trends & Wholesale Comparison Modal */}
+      <Modal
+        visible={showPriceTrends}
+        animationType="slide"
+        onRequestClose={() => setShowPriceTrends(false)}>
+        <PriceTrendsModal
+          product={product}
+          onBack={() => setShowPriceTrends(false)}
+          onOrderNow={() => {
+            setShowPriceTrends(false);
+            onOrderNow?.(product, selectedQty);
+          }}
+        />
+      </Modal>
+
+      {/* "Saved to Wishlist!" Confirmation Modal */}
+      <SavedToWishlistModal
+        visible={showSavedWishlistModal}
+        productTitle={product.title}
+        onClose={() => setShowSavedWishlistModal(false)}
+        onViewWishlist={() => {
+          setShowSavedWishlistModal(false);
+          onOpenWishlist?.();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -296,12 +444,22 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  placeholderBox: {
-    justifyContent: 'center',
+  galleryBadge: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
-  placeholderEmoji: {
-    fontSize: 64,
+  galleryBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   imageBadgesRow: {
     position: 'absolute',
@@ -322,7 +480,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   freshBadge: {
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    backgroundColor: '#2E7D32',
     paddingVertical: 5,
     paddingHorizontal: 10,
     borderRadius: 8,
@@ -330,76 +488,200 @@ const styles = StyleSheet.create({
   freshBadgeText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   bodyContent: {
-    padding: 20,
-    gap: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
   },
   titleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    marginBottom: 14,
   },
   productTitle: {
     fontSize: 22,
     fontWeight: '800',
     color: '#0F172A',
-    letterSpacing: -0.3,
     marginBottom: 4,
+  },
+  locationLink: {
+    marginTop: 2,
   },
   locationText: {
     fontSize: 13,
     color: '#64748B',
+    fontWeight: '500',
+  },
+  mapLinkText: {
+    color: '#2E7D32',
+    fontWeight: '700',
   },
   priceContainer: {
     alignItems: 'flex-end',
   },
   priceValue: {
     fontSize: 24,
-    fontWeight: '900',
-    color: '#166534',
+    fontWeight: '800',
+    color: '#2E7D32',
   },
   currencySymbol: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
   },
   priceUnit: {
     fontSize: 12,
     color: '#64748B',
+    fontWeight: '500',
+  },
+  // Price trends card button
+  priceTrendsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    marginBottom: 12,
+  },
+  priceTrendsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  trendIconBubble: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#DCFCE7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priceTrendsHeading: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  priceTrendsSub: {
+    fontSize: 11,
+    color: '#15803D',
+    marginTop: 1,
+  },
+  viewTrendsBadge: {
+    backgroundColor: '#2E7D32',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  viewTrendsText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  // Reviews Summary Card
+  reviewsSummaryCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginBottom: 16,
+  },
+  reviewsSummaryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bigRatingText: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#B45309',
+  },
+  starsGroup: {
+    justifyContent: 'center',
+  },
+  starIcons: {
+    fontSize: 12,
+    color: '#F59E0B',
+  },
+  reviewCountText: {
+    fontSize: 11,
+    color: '#92400E',
+    fontWeight: '600',
+  },
+  reviewsSummaryRight: {
+    alignItems: 'flex-end',
+  },
+  readReviewsText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#B45309',
   },
   specsRow: {
     flexDirection: 'row',
-    backgroundColor: '#F8FAF8',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E8ECE8',
     gap: 8,
+    marginBottom: 14,
   },
   specBox: {
     flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     alignItems: 'center',
   },
   specLabel: {
-    fontSize: 10.5,
+    fontSize: 10,
+    fontWeight: '600',
     color: '#64748B',
-    marginBottom: 2,
-    textAlign: 'center',
+    marginBottom: 4,
+    textTransform: 'uppercase',
   },
   specValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E293B',
     textAlign: 'center',
   },
+  shortcutsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 18,
+  },
+  shortcutBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  shortcutBtnText: {
+    color: '#166534',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   sectionBlock: {
-    gap: 8,
+    marginBottom: 20,
   },
   sectionHeading: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#0F172A',
+    marginBottom: 8,
   },
   descriptionText: {
     fontSize: 14,
@@ -409,8 +691,8 @@ const styles = StyleSheet.create({
   readMoreLink: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#386641',
-    marginTop: 2,
+    color: '#2E7D32',
+    marginTop: 6,
   },
   farmerCard: {
     flexDirection: 'row',
@@ -420,26 +702,27 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    marginBottom: 20,
   },
   farmerAvatarCircle: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#DCFCE7',
+    backgroundColor: '#E2E8F0',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
-    marginRight: 12,
   },
   farmerAvatarImg: {
     width: '100%',
     height: '100%',
   },
   farmerAvatarText: {
-    fontSize: 20,
+    fontSize: 22,
   },
   farmerDetails: {
     flex: 1,
+    marginLeft: 12,
   },
   farmerNameRow: {
     flexDirection: 'row',
@@ -453,41 +736,39 @@ const styles = StyleSheet.create({
   },
   verifiedTag: {
     backgroundColor: '#DCFCE7',
-    paddingVertical: 2,
     paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 4,
   },
   verifiedTagText: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#166534',
+    color: '#15803D',
   },
   farmerLocation: {
     fontSize: 12,
     color: '#64748B',
-    marginTop: 1,
-  },
-  farmerRating: {
-    fontSize: 11,
-    color: '#059669',
-    fontWeight: '600',
     marginTop: 2,
   },
+  farmerMapLink: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#2E7D32',
+    marginTop: 3,
+  },
   chatFarmerBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    paddingVertical: 6,
+    backgroundColor: '#2E7D32',
     paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 10,
   },
   chatFarmerBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontSize: 13,
-    fontWeight: '600',
-    color: '#334155',
   },
   bulkTable: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8FAFC',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -496,8 +777,8 @@ const styles = StyleSheet.create({
   bulkRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
   },
@@ -506,8 +787,8 @@ const styles = StyleSheet.create({
   },
   bulkTier: {
     fontSize: 13,
+    fontWeight: '600',
     color: '#334155',
-    fontWeight: '500',
   },
   bulkPrice: {
     fontSize: 13,
@@ -515,79 +796,75 @@ const styles = StyleSheet.create({
     color: '#0F172A',
   },
   discountText: {
-    color: '#16A34A',
-    fontWeight: '600',
+    color: '#166534',
+    fontWeight: '800',
   },
   bottomBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
-    gap: 14,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 8,
   },
   qtySelector: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F1F5F9',
-    borderRadius: 14,
-    paddingHorizontal: 6,
-    height: 50,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    height: 48,
   },
   qtyBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
+    width: 38,
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
   },
   qtyBtnDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   qtyBtnText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#0F172A',
+    color: '#1E293B',
   },
   qtyDisplay: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     alignItems: 'center',
+    minWidth: 50,
   },
   qtyValue: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     color: '#0F172A',
   },
   qtyUnit: {
     fontSize: 10,
+    fontWeight: '600',
     color: '#64748B',
   },
   orderBtn: {
     flex: 1,
-    height: 50,
-    backgroundColor: '#386641',
-    borderRadius: 14,
+    backgroundColor: '#2E7D32',
+    height: 48,
+    borderRadius: 12,
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    shadowColor: '#386641',
+    alignItems: 'center',
+    shadowColor: '#2E7D32',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
@@ -595,17 +872,17 @@ const styles = StyleSheet.create({
   },
   orderBtnContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
   orderBtnLabel: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
   },
   orderBtnPrice: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

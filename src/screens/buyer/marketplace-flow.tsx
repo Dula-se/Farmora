@@ -13,15 +13,25 @@ import { AllCategoriesScreen } from './all-categories-screen';
 import { CategoryProductsScreen } from './category-products-screen';
 import { SearchScreen } from './search-screen';
 import { ProductDetailScreen } from './product-detail-screen';
+import { ReviewsScreen } from './reviews-screen';
+import { SimilarProductsScreen } from './similar-products-screen';
+import { CompareProductsScreen } from './compare-products-screen';
+import { WishlistScreen } from './wishlist-screen';
+import { FarmMapScreen } from './farm-map-screen';
 
 export type BuyerScreenView =
   | 'home'
   | 'categories'
   | 'category-products'
   | 'search'
-  | 'product-detail';
+  | 'product-detail'
+  | 'reviews'
+  | 'similar-products'
+  | 'compare-products'
+  | 'wishlist'
+  | 'farm-map';
 
-export type BuyerTab = 'home' | 'market' | 'orders' | 'chats' | 'profile';
+export type BuyerTab = 'home' | 'market' | 'farms' | 'wishlist' | 'profile';
 
 interface MarketplaceFlowProps {
   onBackToAuth?: () => void;
@@ -49,8 +59,19 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
       setCurrentView('home');
     } else if (tab === 'market') {
       setCurrentView('categories');
+    } else if (tab === 'farms') {
+      setCurrentView('farm-map');
+    } else if (tab === 'wishlist') {
+      setCurrentView('wishlist');
     }
   };
+
+  // Check if current screen is full-page flow (so we hide bottom bar if needed)
+  const isFullScreenView =
+    currentView === 'product-detail' ||
+    currentView === 'reviews' ||
+    currentView === 'compare-products' ||
+    currentView === 'farm-map';
 
   return (
     <View style={styles.container}>
@@ -95,23 +116,76 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             product={selectedProduct}
             onBack={() => setCurrentView('home')}
             onOrderNow={(prod, qty) => {
-              alert(`Order confirmed for ${qty} ${prod.unit} of ${prod.title}! Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`);
+              alert(`Order placed for ${qty} ${prod.unit} of ${prod.title}! Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`);
             }}
             onChatFarmer={(fId) => {
               alert(`Starting direct chat with farmer #${fId}`);
+            }}
+            onOpenReviews={() => setCurrentView('reviews')}
+            onOpenSimilar={() => setCurrentView('similar-products')}
+            onOpenCompare={() => setCurrentView('compare-products')}
+            onOpenFarmMap={() => setCurrentView('farm-map')}
+            onOpenWishlist={() => setCurrentView('wishlist')}
+          />
+        )}
+
+        {currentView === 'reviews' && selectedProduct && (
+          <ReviewsScreen
+            product={selectedProduct}
+            onBack={() => setCurrentView('product-detail')}
+          />
+        )}
+
+        {currentView === 'similar-products' && (
+          <SimilarProductsScreen
+            baseProduct={selectedProduct}
+            onBack={() => setCurrentView('product-detail')}
+            onSelectProduct={handleSelectProduct}
+            onOpenCompare={() => setCurrentView('compare-products')}
+            onToggleWishlist={() => {}}
+          />
+        )}
+
+        {currentView === 'compare-products' && (
+          <CompareProductsScreen
+            initialProduct={selectedProduct}
+            onBack={() => setCurrentView('product-detail')}
+            onSelectProduct={(compItem) => {
+              alert(`Selected ${compItem.title} for ordering`);
+            }}
+            onOrderProduct={(compItem) => {
+              alert(`Ordering ${compItem.title} at Rs. ${compItem.pricePerUnit}/${compItem.unit}`);
+            }}
+          />
+        )}
+
+        {currentView === 'wishlist' && (
+          <WishlistScreen
+            onBack={() => setCurrentView('home')}
+            onAddToCart={(item) => {
+              // Add to cart toast / handler
+            }}
+          />
+        )}
+
+        {currentView === 'farm-map' && (
+          <FarmMapScreen
+            onBack={() => setCurrentView('home')}
+            onChatFarmer={(phone) => {
+              alert(`Starting chat with farmer at ${phone}`);
             }}
           />
         )}
       </View>
 
       {/* Persistent Bottom Tab Bar (Matching Figma bottom bar) */}
-      {currentView !== 'product-detail' && (
+      {!isFullScreenView && (
         <View style={styles.bottomTabBar}>
           {/* 1. Home */}
           <Pressable
             style={styles.tabBtn}
             onPress={() => handleTabPress('home')}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'home' ? '#386641' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'home' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
               <Path d="M9 22V12h6v10" />
             </Svg>
@@ -124,7 +198,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <Pressable
             style={styles.tabBtn}
             onPress={() => handleTabPress('market')}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'market' ? '#386641' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'market' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M4 6h16M4 12h16M4 18h7" />
               <Path d="M17 15l3 3-3 3" />
             </Svg>
@@ -133,29 +207,28 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             </Text>
           </Pressable>
 
-          {/* 3. Orders */}
+          {/* 3. Farms / Map */}
           <Pressable
             style={styles.tabBtn}
-            onPress={() => handleTabPress('orders')}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'orders' ? '#386641' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-              <Path d="M3 6h18" />
-              <Path d="M16 10a4 4 0 0 1-8 0" />
+            onPress={() => handleTabPress('farms')}>
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'farms' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+              <Path d="M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
             </Svg>
-            <Text style={[styles.tabLabel, activeTab === 'orders' && styles.tabLabelActive]}>
-              Orders
+            <Text style={[styles.tabLabel, activeTab === 'farms' && styles.tabLabelActive]}>
+              Farms
             </Text>
           </Pressable>
 
-          {/* 4. Chats */}
+          {/* 4. Wishlist */}
           <Pressable
             style={styles.tabBtn}
-            onPress={() => handleTabPress('chats')}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'chats' ? '#386641' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            onPress={() => handleTabPress('wishlist')}>
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'wishlist' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </Svg>
-            <Text style={[styles.tabLabel, activeTab === 'chats' && styles.tabLabelActive]}>
-              Chats
+            <Text style={[styles.tabLabel, activeTab === 'wishlist' && styles.tabLabelActive]}>
+              Wishlist
             </Text>
           </Pressable>
 
@@ -169,7 +242,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
                 handleTabPress('profile');
               }
             }}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'profile' ? '#386641' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'profile' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <Path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
             </Svg>
@@ -215,7 +288,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   tabLabelActive: {
-    color: '#386641',
+    color: '#2E7D32',
     fontWeight: '800',
   },
 });
