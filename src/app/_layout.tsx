@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StyleSheet, View, useColorScheme } from 'react-native';
+import * as Notifications from 'expo-notifications';
+import { useNotifications } from '@/hooks/use-notifications';
 
 import { FarmoraSplashScreen } from '@/components/splash-screen';
 import { LanguageSelectionScreen, LanguageCode } from '@/screens/language-selection-screen';
@@ -16,6 +18,7 @@ import { RegistrationSuccessScreen } from '@/screens/auth/registration-success-s
 import { ForgotPasswordScreen } from '@/screens/auth/forgot-password-screen';
 import { OtpVerificationScreen } from '@/screens/auth/otp-verification-screen';
 import { ResetPasswordScreen } from '@/screens/auth/reset-password-screen';
+import { MarketplaceFlow } from '@/screens/buyer/marketplace-flow';
 import AppTabs from '@/components/app-tabs';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -37,13 +40,31 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const [currentStep, setCurrentStep] = useState<AuthStep>('splash');
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode | null>(null);
-  const [accountType, setAccountType] = useState<AccountType>('farmer');
+  const [accountType, setAccountType] = useState<'farmer' | 'buyer'>('farmer');
   const [resetIdentifier, setResetIdentifier] = useState('+94 77 XXX XXXX');
+
+  // ── Push Notifications ─────────────────────────────────────────────────────
+  // Pass userId here once auth is implemented (e.g. useNotifications(user?.id))
+  const { expoPushToken, notificationResponse } = useNotifications();
+  const lastNotificationResponse = useRef<Notifications.NotificationResponse | null>(null);
 
   useEffect(() => {
     // Hide native splash screen once JavaScript bundle is mounted
     SplashScreen.hideAsync().catch(() => {});
   }, []);
+
+  // Handle notification tap navigation (e.g. deep-link into a screen)
+  useEffect(() => {
+    if (
+      notificationResponse &&
+      notificationResponse !== lastNotificationResponse.current
+    ) {
+      lastNotificationResponse.current = notificationResponse;
+      const data = notificationResponse.notification.request.content.data as Record<string, unknown>;
+      console.log('[Layout] Notification tapped, data:', data);
+      // TODO: navigate based on data.screen or data.type
+    }
+  }, [notificationResponse]);
 
   const renderContent = () => {
     switch (currentStep) {
@@ -80,9 +101,10 @@ export default function TabLayout() {
           <SelectAccountTypeScreen
             onBack={() => setCurrentStep('onboarding')}
             onContinue={(type) => {
-              setAccountType(type);
-              setCurrentStep('login');
+              setAccountType(type === 'buyer' ? 'buyer' : 'farmer');
+              setCurrentStep('register');
             }}
+            onLogin={() => setCurrentStep('login')}
           />
         );
 
@@ -91,7 +113,7 @@ export default function TabLayout() {
           <LoginScreen
             onBack={() => setCurrentStep('account-type')}
             onLoginSuccess={() => setCurrentStep('authenticated')}
-            onCreateAccount={() => setCurrentStep('register')}
+            onCreateAccount={() => setCurrentStep('account-type')}
             onForgotPassword={() => setCurrentStep('forgot-password')}
           />
         );
@@ -99,6 +121,7 @@ export default function TabLayout() {
       case 'register':
         return (
           <RegisterScreen
+            accountType={accountType}
             onBackToLogin={() => setCurrentStep('login')}
             onRegisterSuccess={() => setCurrentStep('registration-success')}
           />
@@ -143,7 +166,7 @@ export default function TabLayout() {
 
       case 'authenticated':
       default:
-        return <AppTabs />;
+        return <MarketplaceFlow onBackToAuth={() => setCurrentStep('login')} />;
     }
   };
 

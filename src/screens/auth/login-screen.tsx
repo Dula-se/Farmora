@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -10,9 +11,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { loginWithApi, ApiUser } from '@/services/api';
 
 interface LoginScreenProps {
-  onLoginSuccess?: () => void;
+  onLoginSuccess?: (user?: ApiUser) => void;
   onForgotPassword?: () => void;
   onCreateAccount?: () => void;
   onBack?: () => void;
@@ -28,10 +30,45 @@ export function LoginScreen({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleLogin = () => {
-    // In production, validate credentials and call API
-    onLoginSuccess?.();
+  const handleLogin = async () => {
+    if (!identifier.trim()) {
+      setErrorMessage('Please enter your mobile number or email.');
+      return;
+    }
+    if (!password) {
+      setErrorMessage('Please enter your password.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await loginWithApi(identifier.trim(), password);
+      console.log('[LoginScreen] Logged in successfully via MongoDB:', data.user.fullName);
+      onLoginSuccess?.(data.user);
+    } catch (err: any) {
+      const msg = err?.message || 'Login failed. Please check your credentials.';
+      setErrorMessage(msg);
+      console.error('[LoginScreen] Error:', msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fillDemoFarmer = () => {
+    setIdentifier('0771234567');
+    setPassword('Farmora@2026');
+    setErrorMessage(null);
+  };
+
+  const fillDemoBuyer = () => {
+    setIdentifier('0779876543');
+    setPassword('Farmora@2026');
+    setErrorMessage(null);
   };
 
   return (
@@ -72,6 +109,26 @@ export function LoginScreen({
           </Text>
         </View>
 
+        {/* Demo Credentials Quick-Fill helper */}
+        <View style={styles.demoBox}>
+          <Text style={styles.demoLabel}>⚡ Quick Fill Demo Accounts (MongoDB):</Text>
+          <View style={styles.demoPillsRow}>
+            <Pressable style={styles.demoPill} onPress={fillDemoFarmer}>
+              <Text style={styles.demoPillText}>🌾 Sunil (Farmer)</Text>
+            </Pressable>
+            <Pressable style={styles.demoPill} onPress={fillDemoBuyer}>
+              <Text style={styles.demoPillText}>🏬 Keells (Buyer)</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Error Alert */}
+        {errorMessage && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>⚠️ {errorMessage}</Text>
+          </View>
+        )}
+
         {/* Input Fields */}
         <View style={styles.formContainer}>
           {/* Mobile or Email */}
@@ -81,10 +138,13 @@ export function LoginScreen({
               <Text style={styles.inputIcon}>📞</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Enter mobile or email address"
+                placeholder="Enter mobile (e.g. 0771234567)"
                 placeholderTextColor="#94A3B8"
                 value={identifier}
-                onChangeText={setIdentifier}
+                onChangeText={(t) => {
+                  setIdentifier(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 autoCapitalize="none"
               />
             </View>
@@ -101,7 +161,10 @@ export function LoginScreen({
                 placeholderTextColor="#94A3B8"
                 secureTextEntry={!showPassword}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
               />
               <Pressable
                 onPress={() => setShowPassword(!showPassword)}
@@ -136,12 +199,18 @@ export function LoginScreen({
 
           {/* Login Button */}
           <Pressable
+            disabled={loading}
             style={({ pressed }) => [
               styles.loginButton,
+              loading && styles.loginButtonDisabled,
               pressed && styles.loginButtonPressed,
             ]}
             onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>Login</Text>
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.loginButtonText}>Login</Text>
+            )}
           </Pressable>
 
           {/* Divider */}
@@ -244,44 +313,88 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 24,
+    paddingTop: 16,
     paddingBottom: 40,
   },
   titleSection: {
-    marginBottom: 28,
+    marginBottom: 20,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: '#0F172A',
     letterSpacing: -0.5,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,
     color: '#64748B',
     lineHeight: 20,
   },
+  demoBox: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 16,
+  },
+  demoLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+    marginBottom: 8,
+  },
+  demoPillsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  demoPill: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#6EE7B7',
+  },
+  demoPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#047857',
+  },
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   formContainer: {
-    gap: 20,
+    gap: 16,
   },
   inputGroup: {
-    gap: 8,
+    gap: 6,
   },
   inputLabel: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#334155',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingHorizontal: 16,
-    height: 54,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 52,
   },
   inputIcon: {
     fontSize: 16,
@@ -289,11 +402,11 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: '#0F172A',
   },
   eyeButton: {
-    padding: 4,
+    padding: 6,
   },
   eyeIcon: {
     fontSize: 16,
@@ -302,21 +415,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: -4,
+    marginVertical: 4,
   },
   rememberMeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#94A3B8',
+    borderColor: '#CBD5E1',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 8,
     backgroundColor: '#FFFFFF',
   },
   checkboxChecked: {
@@ -326,23 +439,19 @@ const styles = StyleSheet.create({
   checkIcon: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   rememberMeText: {
     fontSize: 13,
-    color: '#475569',
-    fontWeight: '500',
+    color: '#64748B',
   },
   forgotPasswordPill: {
-    backgroundColor: '#F59E0B20',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: 4,
   },
   forgotPasswordText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#D97706',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#386641',
   },
   loginButton: {
     backgroundColor: '#386641',
@@ -350,12 +459,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
     shadowColor: '#386641',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 3,
+    marginTop: 8,
+  },
+  loginButtonDisabled: {
+    opacity: 0.7,
   },
   loginButtonPressed: {
     backgroundColor: '#2F5436',
@@ -377,7 +489,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E2E8F0',
   },
   dividerText: {
-    paddingHorizontal: 14,
+    marginHorizontal: 12,
     fontSize: 12,
     fontWeight: '600',
     color: '#94A3B8',
@@ -386,6 +498,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 4,
   },
   noAccountText: {
     fontSize: 14,

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -10,23 +11,28 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { registerWithApi, ApiUser } from '@/services/api';
 
 interface RegisterScreenProps {
-  onRegisterSuccess?: () => void;
+  accountType?: 'farmer' | 'buyer';
+  onRegisterSuccess?: (user?: ApiUser) => void;
   onBackToLogin?: () => void;
 }
 
 export function RegisterScreen({
+  accountType = 'farmer',
   onRegisterSuccess,
   onBackToLogin,
 }: RegisterScreenProps) {
-  const [fullName, setFullName] = useState('John Silva');
-  const [mobileNumber, setMobileNumber] = useState('0771234567');
-  const [email, setEmail] = useState('john@gmail.com');
-  const [password, setPassword] = useState('Farmora@2026');
-  const [confirmPassword, setConfirmPassword] = useState('Farmora@2026');
+  const [fullName, setFullName] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Field touch states for showing errors
   const [touched, setTouched] = useState({
@@ -39,7 +45,7 @@ export function RegisterScreen({
   });
 
   // Validation logic
-  const isFullNameValid = fullName.trim().length > 0;
+  const isFullNameValid = fullName.trim().length >= 2;
   const isMobileValid = /^0\d{9}$/.test(mobileNumber.replace(/\s+/g, ''));
   const isEmailValid =
     !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -59,7 +65,7 @@ export function RegisterScreen({
     isConfirmPasswordValid &&
     termsAccepted;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setTouched({
       fullName: true,
       mobileNumber: true,
@@ -69,8 +75,34 @@ export function RegisterScreen({
       terms: true,
     });
 
-    if (isFormValid) {
-      onRegisterSuccess?.();
+    if (!isFormValid) {
+      if (!isFullNameValid) setErrorMessage('Please enter a valid full name (at least 2 letters).');
+      else if (!isMobileValid) setErrorMessage('Please enter a valid 10-digit Sri Lankan mobile number (e.g. 0771234567).');
+      else if (!isPasswordValid) setErrorMessage('Password must be 8+ chars with uppercase, number & symbol.');
+      else if (!isConfirmPasswordValid) setErrorMessage('Passwords do not match.');
+      else if (!termsAccepted) setErrorMessage('You must accept the Terms and Privacy Policy.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await registerWithApi({
+        fullName: fullName.trim(),
+        mobileNumber: mobileNumber.replace(/\s+/g, ''),
+        email: email.trim() || undefined,
+        password,
+        accountType: accountType || 'farmer',
+      });
+      console.log('[RegisterScreen] Registered successfully via MongoDB:', data.user.fullName);
+      onRegisterSuccess?.(data.user);
+    } catch (err: any) {
+      const msg = err?.message || 'Registration failed. Please try again.';
+      setErrorMessage(msg);
+      console.error('[RegisterScreen] Error:', msg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -106,11 +138,23 @@ export function RegisterScreen({
         keyboardShouldPersistTaps="handled">
         {/* Title Section */}
         <View style={styles.titleSection}>
+          <View style={styles.roleBadge}>
+            <Text style={styles.roleBadgeText}>
+              {accountType === 'farmer' ? '🌾 Farmer Account' : '🛍️ Buyer Account'}
+            </Text>
+          </View>
           <Text style={styles.title}>Create Account</Text>
           <Text style={styles.subtitle}>
             Join the Farmora agricultural marketplace
           </Text>
         </View>
+
+        {/* Error Alert */}
+        {errorMessage && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>⚠️ {errorMessage}</Text>
+          </View>
+        )}
 
         <View style={styles.formContainer}>
           {/* 1. Full Name */}
@@ -127,12 +171,15 @@ export function RegisterScreen({
                 placeholder="Enter your full name"
                 placeholderTextColor="#94A3B8"
                 value={fullName}
-                onChangeText={setFullName}
+                onChangeText={(t) => {
+                  setFullName(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 onBlur={() => setTouched((p) => ({ ...p, fullName: true }))}
               />
             </View>
             {touched.fullName && !isFullNameValid && (
-              <Text style={styles.errorText}>ⓘ Full name is required</Text>
+              <Text style={styles.errorText}>ⓘ Full name must be at least 2 characters</Text>
             )}
           </View>
 
@@ -147,29 +194,27 @@ export function RegisterScreen({
               <Text style={styles.inputIcon}>📞</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="e.g. 0771234567"
+                placeholder="0771234567"
                 placeholderTextColor="#94A3B8"
                 keyboardType="phone-pad"
                 value={mobileNumber}
-                onChangeText={setMobileNumber}
+                onChangeText={(t) => {
+                  setMobileNumber(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 onBlur={() => setTouched((p) => ({ ...p, mobileNumber: true }))}
               />
             </View>
             {touched.mobileNumber && !isMobileValid && (
               <Text style={styles.errorText}>
-                ⓘ Please enter a valid 10-digit mobile number
+                ⓘ Must be a valid 10-digit Sri Lankan number (e.g. 0771234567)
               </Text>
             )}
           </View>
 
           {/* 3. Email (Optional) */}
           <View style={styles.inputGroup}>
-            <View style={styles.labelRow}>
-              <Text style={styles.inputLabel}>Email</Text>
-              <View style={styles.optionalBadge}>
-                <Text style={styles.optionalText}>Optional</Text>
-              </View>
-            </View>
+            <Text style={styles.inputLabel}>Email Address (Optional)</Text>
             <View
               style={[
                 styles.inputContainer,
@@ -178,19 +223,20 @@ export function RegisterScreen({
               <Text style={styles.inputIcon}>✉️</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="john@example.com"
+                placeholder="name@example.com"
                 placeholderTextColor="#94A3B8"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 onBlur={() => setTouched((p) => ({ ...p, email: true }))}
               />
             </View>
             {touched.email && !isEmailValid && (
-              <Text style={styles.errorText}>
-                ⓘ Please enter a valid email address
-              </Text>
+              <Text style={styles.errorText}>ⓘ Please enter a valid email address</Text>
             )}
           </View>
 
@@ -205,23 +251,26 @@ export function RegisterScreen({
               <Text style={styles.inputIcon}>🔒</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="At least 8 characters"
+                placeholder="Min 8 chars, 1 uppercase, 1 number, 1 symbol"
                 placeholderTextColor="#94A3B8"
                 secureTextEntry={!showPassword}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 onBlur={() => setTouched((p) => ({ ...p, password: true }))}
               />
               <Pressable
                 onPress={() => setShowPassword(!showPassword)}
-                hitSlop={10}>
+                hitSlop={10}
+                style={styles.eyeButton}>
                 <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁️'}</Text>
               </Pressable>
             </View>
             {touched.password && !isPasswordValid && (
               <Text style={styles.errorText}>
-                ⓘ Password must be at least 8 characters with uppercase, number, and
-                special character
+                ⓘ 8+ chars with uppercase, number & symbol required
               </Text>
             )}
           </View>
@@ -243,7 +292,10 @@ export function RegisterScreen({
                 placeholderTextColor="#94A3B8"
                 secureTextEntry={!showPassword}
                 value={confirmPassword}
-                onChangeText={setConfirmPassword}
+                onChangeText={(t) => {
+                  setConfirmPassword(t);
+                  if (errorMessage) setErrorMessage(null);
+                }}
                 onBlur={() => setTouched((p) => ({ ...p, confirmPassword: true }))}
               />
             </View>
@@ -269,25 +321,24 @@ export function RegisterScreen({
                 styles.termsText,
                 touched.terms && !termsAccepted && styles.termsTextError,
               ]}>
-              You must accept the Terms and Privacy Policy
+              I accept the Terms and Privacy Policy
             </Text>
           </Pressable>
 
           {/* Create Account Action Button */}
           <Pressable
+            disabled={loading}
             style={({ pressed }) => [
               styles.createButton,
-              !isFormValid && styles.createButtonDisabled,
+              (!isFormValid || loading) && styles.createButtonDisabled,
               pressed && isFormValid && styles.createButtonPressed,
             ]}
             onPress={handleSubmit}>
-            <Text
-              style={[
-                styles.createButtonText,
-                !isFormValid && styles.createButtonTextDisabled,
-              ]}>
-              Create Account
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.createButtonText}>Create Account</Text>
+            )}
           </Pressable>
 
           {/* Back to Login link */}
@@ -383,14 +434,27 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 20,
+    paddingTop: 16,
     paddingBottom: 40,
   },
   titleSection: {
-    marginBottom: 24,
+    marginBottom: 20,
+  },
+  roleBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#DCFCE7',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  roleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#166534',
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: '#0F172A',
     letterSpacing: -0.5,
@@ -399,7 +463,19 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#64748B',
-    lineHeight: 20,
+  },
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorBannerText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '600',
   },
   formContainer: {
     gap: 16,
@@ -407,40 +483,24 @@ const styles = StyleSheet.create({
   inputGroup: {
     gap: 6,
   },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   inputLabel: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#334155',
-  },
-  optionalBadge: {
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-  },
-  optionalText: {
-    fontSize: 11,
-    color: '#64748B',
     fontWeight: '600',
+    color: '#334155',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingHorizontal: 16,
+    borderRadius: 14,
+    paddingHorizontal: 14,
     height: 52,
   },
   inputContainerError: {
     borderColor: '#EF4444',
-    borderWidth: 1.5,
+    backgroundColor: '#FEF2F2',
   },
   inputIcon: {
     fontSize: 16,
@@ -448,32 +508,34 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: '#0F172A',
+  },
+  eyeButton: {
+    padding: 6,
   },
   eyeIcon: {
     fontSize: 16,
   },
   errorText: {
     fontSize: 12,
-    color: '#DC2626',
-    lineHeight: 16,
-    marginTop: 2,
+    color: '#EF4444',
+    fontWeight: '500',
   },
   termsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 6,
+    marginVertical: 4,
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#94A3B8',
+    borderColor: '#CBD5E1',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 10,
     backgroundColor: '#FFFFFF',
   },
   checkboxChecked: {
@@ -486,16 +548,15 @@ const styles = StyleSheet.create({
   checkIcon: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   termsText: {
     fontSize: 13,
-    color: '#475569',
+    color: '#64748B',
     flex: 1,
-    lineHeight: 18,
   },
   termsTextError: {
-    color: '#DC2626',
+    color: '#EF4444',
   },
   createButton: {
     backgroundColor: '#386641',
@@ -503,15 +564,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
     shadowColor: '#386641',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 3,
+    marginTop: 8,
   },
   createButtonDisabled: {
-    backgroundColor: '#CBD5E1',
+    backgroundColor: '#94A3B8',
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -525,13 +586,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   createButtonTextDisabled: {
-    color: '#64748B',
+    color: '#F1F5F9',
   },
   loginLinkRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   alreadyAccountText: {
     fontSize: 14,

@@ -15,6 +15,7 @@
     },
     "android": {
       "package": "com.farmora.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#1E5E3A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -35,6 +36,16 @@
           "backgroundColor": "#3E623E",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 104
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#1E5E3A",
+          "defaultChannel": "default",
+          "sounds": [],
+          "enableBackgroundRemoteNotifications": false
         }
       ]
     ],

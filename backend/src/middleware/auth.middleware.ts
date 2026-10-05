@@ -1,15 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env.js';
-import { db } from '../models/mockDb.js';
+import { UserModel, IUser } from '../models/User.js';
 import { sendError } from '../utils/response.js';
-import { AccountType, User } from '../types/index.js';
+import { AccountType } from '../types/index.js';
 
 // Extend Express Request type to include user
 declare global {
   namespace Express {
     interface Request {
-      user?: User;
+      user?: IUser;
     }
   }
 }
@@ -29,7 +29,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, config.jwt.secret) as JwtPayload;
 
-    const user = await db.findUserById(decoded.userId);
+    const user = await UserModel.findById(decoded.userId);
     if (!user) {
       return sendError(res, 'User session not found or account was deleted', 401);
     }

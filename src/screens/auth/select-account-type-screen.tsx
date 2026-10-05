@@ -2,170 +2,193 @@ import React, { useState } from 'react';
 import {
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Path, Polyline } from 'react-native-svg';
 
-export type AccountType =
-  | 'farmer'
-  | 'buyer'
-  | 'restaurant'
-  | 'supermarket'
-  | 'exporter';
-
-interface AccountOption {
-  id: AccountType;
-  icon: string;
-  title: string;
-  description: string;
-}
-
-const ACCOUNT_OPTIONS: AccountOption[] = [
-  {
-    id: 'farmer',
-    icon: '🌱',
-    title: 'Farmer /\n/ விவசாயි',
-    description: 'Sell your fresh harvest directly to buyers & get fair prices.',
-  },
-  {
-    id: 'buyer',
-    icon: '👤',
-    title: 'Individual Buyer',
-    description: 'Buy fresh home groceries directly from verified local growers.',
-  },
-  {
-    id: 'restaurant',
-    icon: '🍴',
-    title: 'Restaurant / Chef',
-    description: 'Source bulk fresh produce directly for your kitchen daily.',
-  },
-  {
-    id: 'supermarket',
-    icon: '🏪',
-    title: 'Supermarket Buyer',
-    description: 'High volume supply chain matching and guaranteed scheduled supply.',
-  },
-  {
-    id: 'exporter',
-    icon: '📦',
-    title: 'Exporter / Wholesaler',
-    description: 'Procure export quality commodities with full origin traceability.',
-  },
-];
+export type AccountType = 'farmer' | 'buyer' | 'restaurant' | 'supermarket' | 'exporter';
 
 interface SelectAccountTypeScreenProps {
   onContinue?: (selectedType: AccountType) => void;
+  onSelectFarmer?: () => void;
+  onSelectBuyer?: () => void;
+  onLogin?: () => void;
   onBack?: () => void;
 }
 
 export function SelectAccountTypeScreen({
   onContinue,
+  onSelectFarmer,
+  onSelectBuyer,
+  onLogin,
   onBack,
 }: SelectAccountTypeScreenProps) {
-  const [selectedType, setSelectedType] = useState<AccountType>('farmer');
+  const [selectedRole, setSelectedRole] = useState<'farmer' | 'buyer'>('farmer');
+
+  const handleSelect = (role: 'farmer' | 'buyer') => {
+    setSelectedRole(role);
+    if (role === 'farmer') {
+      onSelectFarmer ? onSelectFarmer() : onContinue?.('farmer');
+    } else {
+      onSelectBuyer ? onSelectBuyer() : onContinue?.('buyer');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FAFBF9" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Top Header */}
-      <View style={styles.header}>
-        <View style={styles.brandContainer}>
-          <View style={styles.logoSquare}>
-            <View style={styles.sproutMini}>
-              <View style={styles.sproutMiniLeafOrange} />
-              <View style={styles.sproutMiniLeafWhite} />
-              <View style={styles.sproutMiniStem} />
-            </View>
-          </View>
-          <Text style={styles.brandName}>Farmora</Text>
-        </View>
-
-        {onBack && (
-          <Pressable onPress={onBack} hitSlop={12}>
-            <Text style={styles.backLink}>Back</Text>
+      {/* Optional Top Bar for Back button */}
+      <View style={styles.topBar}>
+        {onBack ? (
+          <Pressable onPress={onBack} hitSlop={12} style={styles.backButton}>
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M19 12H5M12 19l-7-7 7-7" />
+            </Svg>
           </Pressable>
+        ) : (
+          <View style={styles.backPlaceholder} />
         )}
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        {/* Title Section */}
-        <View style={styles.titleSection}>
-          <Text style={styles.title}>Select Account Type</Text>
-          <Text style={styles.subtitle}>
-            Choose how you want to use the Farmora ecosystem
-          </Text>
+      <View style={styles.contentContainer}>
+        {/* Top Leaf Emblem */}
+        <View style={styles.badgeWrapper}>
+          <View style={styles.leafBadge}>
+            <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
+              {/* Stylized leaf matching screenshot */}
+              <Path
+                d="M19.5 4.5C14.5 4 8 7 5.5 12C3 17 5 20.5 7.5 20.5C10 20.5 14 18.5 17 14.5C20 10.5 20 6.5 19.5 4.5Z"
+                stroke="#FFFFFF"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <Path
+                d="M8.5 17.5C10.8 15.2 13.5 13 16.5 11"
+                stroke="#FFFFFF"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+              />
+            </Svg>
+          </View>
         </View>
 
-        {/* Options List */}
-        <View style={styles.optionsList}>
-          {ACCOUNT_OPTIONS.map((option) => {
-            const isSelected = selectedType === option.id;
+        {/* Title & Subtitle */}
+        <Text style={styles.title}>Welcome to Farmora</Text>
+        <Text style={styles.subtitle}>Choose how you want to use Farmora</Text>
 
-            return (
-              <Pressable
-                key={option.id}
-                style={({ pressed }) => [
-                  styles.card,
-                  isSelected ? styles.cardSelected : styles.cardUnselected,
-                  pressed && styles.cardPressed,
-                ]}
-                onPress={() => setSelectedType(option.id)}>
-                {/* Icon Container */}
-                <View
-                  style={[
-                    styles.iconCircle,
-                    isSelected && styles.iconCircleSelected,
-                  ]}>
-                  <Text style={styles.iconText}>{option.icon}</Text>
-                </View>
+        {/* Option Cards */}
+        <View style={styles.cardsContainer}>
+          {/* 1. Register as Farmer */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.card,
+              selectedRole === 'farmer' ? styles.cardFarmerActive : styles.cardInactive,
+              pressed && styles.cardPressed,
+            ]}
+            onPress={() => handleSelect('farmer')}>
+            <View style={styles.farmerIconCircle}>
+              {/* Tractor Icon */}
+              <Svg
+                width={26}
+                height={26}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#2D5A27"
+                strokeWidth={1.9}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Path d="M 3 16.5 a 3.5 3.5 0 1 0 7 0 a 3.5 3.5 0 1 0 -7 0" />
+                <Path d="M 15 17.5 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0" />
+                <Path d="M6.5 13V6.5H12V13" />
+                <Path d="M12 9H17.5V15H15" />
+                <Path d="M10 16.5H15" />
+                <Path d="M6.5 6.5H4" />
+                <Path d="M14 6.5V9" />
+              </Svg>
+            </View>
 
-                {/* Text Content */}
-                <View style={styles.textContent}>
-                  <Text
-                    style={[
-                      styles.cardTitle,
-                      isSelected && styles.cardTitleSelected,
-                    ]}>
-                    {option.title}
-                  </Text>
-                  <Text
-                    style={styles.cardDescription}
-                    numberOfLines={1}
-                    ellipsizeMode="tail">
-                    {option.description}
-                  </Text>
-                </View>
+            <View style={styles.textContainer}>
+              <Text style={styles.cardTitle}>Register as Farmer</Text>
+              <Text style={styles.cardDescription}>
+                Sell your fresh produce directly to buyers across Sri Lanka
+              </Text>
+            </View>
 
-                {/* Radio Circle */}
-                <View
-                  style={[
-                    styles.radioOuter,
-                    isSelected ? styles.radioOuterSelected : styles.radioOuterUnselected,
-                  ]}>
-                  {isSelected && <View style={styles.radioInner} />}
-                </View>
-              </Pressable>
-            );
-          })}
+            <View style={styles.arrowContainer}>
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#94A3B8"
+                strokeWidth={2.4}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Polyline points="9 18 15 12 9 6" />
+              </Svg>
+            </View>
+          </Pressable>
+
+          {/* 2. Register as Buyer */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.card,
+              selectedRole === 'buyer' ? styles.cardBuyerActive : styles.cardInactive,
+              pressed && styles.cardPressed,
+            ]}
+            onPress={() => handleSelect('buyer')}>
+            <View style={styles.buyerIconCircle}>
+              {/* Shopping Bag / Basket Icon */}
+              <Svg
+                width={24}
+                height={24}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#E67E22"
+                strokeWidth={1.9}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Path d="M6 2L3 6V20C3 20.53 3.21 21.04 3.59 21.41C3.96 21.79 4.47 22 5 22H19C19.53 22 20.04 21.79 20.41 21.41C20.79 21.04 21 20.53 21 20V6L18 2H6Z" />
+                <Path d="M3 6H21" />
+                <Path d="M16 10C16 12.21 14.21 14 12 14C9.79 14 8 12.21 8 10" />
+              </Svg>
+            </View>
+
+            <View style={styles.textContainer}>
+              <Text style={styles.cardTitle}>Register as Buyer</Text>
+              <Text style={styles.cardDescription}>
+                Buy fresh produce directly from local farmers
+              </Text>
+            </View>
+
+            <View style={styles.arrowContainer}>
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#94A3B8"
+                strokeWidth={2.4}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Polyline points="9 18 15 12 9 6" />
+              </Svg>
+            </View>
+          </Pressable>
         </View>
-      </ScrollView>
+      </View>
 
-      {/* Footer Continue Button */}
+      {/* Bottom Footer: Already have an account? Log In */}
       <View style={styles.footer}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.continueButton,
-            pressed && styles.continueButtonPressed,
-          ]}
-          onPress={() => onContinue?.(selectedType)}>
-          <Text style={styles.continueButtonText}>Continue</Text>
+        <Text style={styles.footerText}>Already have an account? </Text>
+        <Pressable onPress={onLogin} hitSlop={12}>
+          <Text style={styles.loginLink}>Log In</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -175,200 +198,147 @@ export function SelectAccountTypeScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FAFBF9',
-  },
-  header: {
-    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'space-between',
-    alignItems: 'center',
+  },
+  topBar: {
+    height: 48,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  backPlaceholder: {
+    width: 40,
+    height: 40,
+  },
+  contentContainer: {
+    flex: 1,
     paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? 14 : 10,
-    paddingBottom: 12,
-  },
-  brandContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
+    paddingTop: Platform.OS === 'android' ? 24 : 16,
   },
-  logoSquare: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+  badgeWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  leafBadge: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: '#386641',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
-  },
-  sproutMini: {
-    width: 14,
-    height: 14,
-    position: 'relative',
-    alignItems: 'center',
-  },
-  sproutMiniLeafOrange: {
-    position: 'absolute',
-    top: 1,
-    left: 1,
-    width: 5,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E58A54',
-    transform: [{ rotate: '-35deg' }],
-  },
-  sproutMiniLeafWhite: {
-    position: 'absolute',
-    top: 2,
-    right: 1,
-    width: 5.5,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#FFFFFF',
-    transform: [{ rotate: '35deg' }],
-  },
-  sproutMiniStem: {
-    position: 'absolute',
-    top: 4,
-    width: 1.5,
-    height: 7,
-    borderRadius: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  brandName: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#1A2E20',
-    letterSpacing: -0.3,
-  },
-  backLink: {
-    fontSize: 14,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
-  titleSection: {
-    marginBottom: 24,
+    shadowColor: '#386641',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    color: '#16281D',
+    letterSpacing: -0.4,
+    textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 14.5,
     color: '#64748B',
-    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 44,
   },
-  optionsList: {
-    gap: 14,
+  cardsContainer: {
+    width: '100%',
+    gap: 16,
   },
   card: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    paddingVertical: 16,
+    paddingVertical: 18,
     paddingHorizontal: 16,
-    shadowColor: '#1A2E20',
-    shadowOffset: { width: 0, height: 3 },
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
-    shadowRadius: 8,
+    shadowRadius: 12,
     elevation: 2,
   },
-  cardSelected: {
-    borderWidth: 2,
+  cardFarmerActive: {
+    borderWidth: 1.8,
     borderColor: '#386641',
   },
-  cardUnselected: {
+  cardBuyerActive: {
+    borderWidth: 1.8,
+    borderColor: '#386641',
+  },
+  cardInactive: {
     borderWidth: 1,
-    borderColor: '#E8ECE8',
+    borderColor: '#E2E8F0',
   },
   cardPressed: {
-    transform: [{ scale: 0.99 }],
+    transform: [{ scale: 0.985 }],
     opacity: 0.95,
   },
-  iconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F1F5F9',
+  farmerIconCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#EBF5EE',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 14,
   },
-  iconCircleSelected: {
-    backgroundColor: '#EAF4EC',
+  buyerIconCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FEF3E2',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  iconText: {
-    fontSize: 22,
-  },
-  textContent: {
+  textContainer: {
     flex: 1,
-    marginRight: 12,
+    marginLeft: 14,
+    marginRight: 8,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '700',
     color: '#0F172A',
-    lineHeight: 22,
-  },
-  cardTitleSelected: {
-    color: '#1A2E20',
+    marginBottom: 4,
+    letterSpacing: -0.2,
   },
   cardDescription: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#64748B',
-    marginTop: 2,
+    lineHeight: 18,
   },
-  radioOuter: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  radioOuterSelected: {
-    borderWidth: 2.5,
-    borderColor: '#386641',
-  },
-  radioOuterUnselected: {
-    borderWidth: 2,
-    borderColor: '#CBD5E1',
-  },
-  radioInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#386641',
+  arrowContainer: {
+    paddingLeft: 4,
   },
   footer: {
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 28,
-    paddingTop: 12,
-  },
-  continueButton: {
-    backgroundColor: '#386641',
-    height: 56,
-    borderRadius: 18,
-    alignItems: 'center',
+    flexDirection: 'row',
     justifyContent: 'center',
-    shadowColor: '#386641',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 3,
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 32,
   },
-  continueButtonPressed: {
-    backgroundColor: '#2F5436',
-    transform: [{ scale: 0.99 }],
+  footerText: {
+    fontSize: 14.5,
+    color: '#64748B',
+    fontWeight: '400',
   },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+  loginLink: {
+    fontSize: 14.5,
+    color: '#386641',
     fontWeight: '700',
   },
 });

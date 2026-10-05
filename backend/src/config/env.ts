@@ -9,6 +9,10 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || '5001'}`,
   clientUrl: process.env.CLIENT_URL || 'http://localhost:8081',
+  mongo: {
+    uri: process.env.MONGODB_URI || '',
+    dbName: process.env.MONGODB_DB_NAME || 'farmora',
+  },
   jwt: {
     secret: process.env.JWT_SECRET || 'famora_dev_secret_key_change_me_in_prod',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',

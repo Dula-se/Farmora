@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { db } from '../models/mockDb.js';
+import { UserModel } from '../models/User.js';
+import { OtpModel } from '../models/Otp.js';
 import { config } from '../config/env.js';
 import { sendSuccess, sendError } from '../utils/response.js';
-import { AccountType, User } from '../types/index.js';
+import { AccountType } from '../types/index.js';
 
 // Validation Schemas
 export const registerSchema = z.object({
@@ -49,7 +50,10 @@ export const resetPasswordSchema = z.object({
 });
 
 // Helper: Remove password hash before returning
-function sanitizeUser(user: User): Omit<User, 'passwordHash'> {
+function sanitizeUser(user: any) {
+  if (typeof user.toJSON === 'function') {
+    return user.toJSON();
+  }
   const { passwordHash: _, ...safeUser } = user;
   return safeUser;
 }
@@ -68,16 +72,17 @@ export class AuthController {
   static async register(req: Request, res: Response) {
     try {
       const { fullName, mobileNumber, email, password, accountType, district, address } = req.body;
+      const cleanMobile = mobileNumber.replace(/\s+/g, '');
 
       // Check if mobile already exists
-      const existingMobile = await db.findUserByMobile(mobileNumber);
+      const existingMobile = await UserModel.findByMobile(cleanMobile);
       if (existingMobile) {
         return sendError(res, 'An account with this mobile number already exists.', 409);
       }
 
       // Check if email already exists (if provided)
       if (email && email.trim()) {
-        const existingEmail = await db.findUserByEmail(email);
+        const existingEmail = await UserModel.findByEmail(email);
         if (existingEmail) {
           return sendError(res, 'An account with this email already exists.', 409);
         }
@@ -85,9 +90,9 @@ export class AuthController {
 
       const passwordHash = await bcrypt.hash(password, 10);
 
-      const newUser = await db.createUser({
+      const newUser = await UserModel.create({
         fullName,
-        mobileNumber: mobileNumber.replace(/\s+/g, ''),
+        mobileNumber: cleanMobile,
         email: email?.trim() || undefined,
         passwordHash,
         accountType,
@@ -98,9 +103,10 @@ export class AuthController {
 
       // Generate demo OTP for mobile verification
       const demoOtp = '123456';
-      db.setOtp(newUser.mobileNumber, demoOtp);
+      await OtpModel.deleteMany({ identifier: cleanMobile });
+      await OtpModel.create({ identifier: cleanMobile, code: demoOtp });
 
-      const token = generateToken(newUser.id, newUser.accountType);
+      const token = generateToken(newUser._id.toString(), newUser.accountType);
 
       return sendSuccess(
         res,
@@ -126,12 +132,12 @@ export class AuthController {
       const { identifier, password } = req.body;
 
       // Check if user exists by mobile or email
-      let user = await db.findUserByMobile(identifier);
+      let user = await UserModel.findByMobile(identifier);
       if (!user && identifier.includes('@')) {
-        user = await db.findUserByEmail(identifier);
+        user = await UserModel.findByEmail(identifier);
       }
 
-      if (!user) {
+      if (!user || !user.passwordHash) {
         return sendError(res, 'Invalid credentials. User not found.', 401);
       }
 
@@ -140,7 +146,7 @@ export class AuthController {
         return sendError(res, 'Invalid password.', 401);
       }
 
-      const token = generateToken(user.id, user.accountType);
+      const token = generateToken(user._id.toString(), user.accountType);
 
       return sendSuccess(
         res,
@@ -166,7 +172,8 @@ export class AuthController {
 
       // In production, integrate SMS Gateway (e.g. Dialog Ideamart, Mobitel, Twilio)
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      db.setOtp(cleanMobile, otpCode, 300); // 5 minutes TTL
+      await OtpModel.deleteMany({ identifier: cleanMobile });
+      await OtpModel.create({ identifier: cleanMobile, code: otpCode });
 
       return sendSuccess(
         res,
@@ -191,16 +198,15 @@ export class AuthController {
       const { mobileNumber, code } = req.body;
       const cleanMobile = mobileNumber.replace(/\s+/g, '');
 
-      const isValid = db.verifyOtp(cleanMobile, code);
-      if (!isValid) {
+      const otpEntry = await OtpModel.findOne({ identifier: cleanMobile, code });
+      if (!otpEntry) {
         return sendError(res, 'Invalid or expired OTP code.', 400);
       }
 
+      await OtpModel.deleteMany({ identifier: cleanMobile });
+
       // Mark user as verified if exists
-      const user = await db.findUserByMobile(cleanMobile);
-      if (user) {
-        await db.updateUser(user.id, { isVerified: true });
-      }
+      await UserModel.findOneAndUpdate({ mobileNumber: cleanMobile }, { isVerified: true });
 
       return sendSuccess(
         res,
@@ -221,18 +227,21 @@ export class AuthController {
       const { mobileNumber, code, newPassword } = req.body;
       const cleanMobile = mobileNumber.replace(/\s+/g, '');
 
-      const isValid = db.verifyOtp(cleanMobile, code);
-      if (!isValid) {
+      const otpEntry = await OtpModel.findOne({ identifier: cleanMobile, code });
+      if (!otpEntry) {
         return sendError(res, 'Invalid or expired verification code.', 400);
       }
 
-      const user = await db.findUserByMobile(cleanMobile);
+      const user = await UserModel.findByMobile(cleanMobile);
       if (!user) {
         return sendError(res, 'Account with this mobile number does not exist.', 404);
       }
 
+      await OtpModel.deleteMany({ identifier: cleanMobile });
+
       const passwordHash = await bcrypt.hash(newPassword, 10);
-      await db.updateUser(user.id, { passwordHash });
+      user.passwordHash = passwordHash;
+      await user.save();
 
       return sendSuccess(
         res,

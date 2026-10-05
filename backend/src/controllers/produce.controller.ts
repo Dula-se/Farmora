@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { db } from '../models/mockDb.js';
+import { ProduceModel } from '../models/Produce.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { ProduceCategory, ProduceUnit } from '../types/index.js';
 
@@ -43,14 +43,32 @@ export class ProduceController {
     try {
       const { category, district, farmerId, search, minPrice, maxPrice } = req.query;
 
-      const items = await db.listProduce({
-        category: category as string,
-        district: district as string,
-        farmerId: farmerId as string,
-        search: search as string,
-        minPrice: minPrice ? parseFloat(minPrice as string) : undefined,
-        maxPrice: maxPrice ? parseFloat(maxPrice as string) : undefined,
-      });
+      const filter: Record<string, any> = {};
+
+      if (category) {
+        filter.category = (category as string).toLowerCase();
+      }
+      if (district) {
+        filter.locationDistrict = new RegExp(`^${district}$`, 'i');
+      }
+      if (farmerId) {
+        filter.farmerId = farmerId;
+      }
+      if (search) {
+        const q = String(search).trim();
+        filter.$or = [
+          { title: { $regex: q, $options: 'i' } },
+          { description: { $regex: q, $options: 'i' } },
+          { locationCity: { $regex: q, $options: 'i' } },
+        ];
+      }
+      if (minPrice !== undefined || maxPrice !== undefined) {
+        filter.pricePerUnit = {};
+        if (minPrice !== undefined) filter.pricePerUnit.$gte = parseFloat(minPrice as string);
+        if (maxPrice !== undefined) filter.pricePerUnit.$lte = parseFloat(maxPrice as string);
+      }
+
+      const items = await ProduceModel.find(filter).sort({ createdAt: -1 });
 
       return sendSuccess(res, items, 'Produce listings retrieved successfully', 200, {
         total: items.length,
@@ -67,7 +85,7 @@ export class ProduceController {
   static async getById(req: Request, res: Response) {
     try {
       const id = req.params.id as string;
-      const produce = await db.findProduceById(id);
+      const produce = await ProduceModel.findById(id);
 
       if (!produce) {
         return sendError(res, 'Produce listing not found', 404);
@@ -86,10 +104,11 @@ export class ProduceController {
   static async create(req: Request, res: Response) {
     try {
       const user = req.user!;
+      const userId = (user as any)._id || user.id;
       const data = req.body;
 
-      const newProduce = await db.createProduce({
-        farmerId: user.id,
+      const newProduce = await ProduceModel.create({
+        farmerId: userId,
         farmerName: user.fullName,
         farmerMobile: user.mobileNumber,
         farmerAvatar: user.avatarUrl,
@@ -123,18 +142,19 @@ export class ProduceController {
     try {
       const id = req.params.id as string;
       const user = req.user!;
+      const userId = ((user as any)._id || user.id).toString();
 
-      const existing = await db.findProduceById(id);
+      const existing = await ProduceModel.findById(id);
       if (!existing) {
         return sendError(res, 'Produce listing not found', 404);
       }
 
       // Check ownership
-      if (existing.farmerId !== user.id) {
+      if (existing.farmerId.toString() !== userId) {
         return sendError(res, 'You are not authorized to edit this listing', 403);
       }
 
-      const updated = await db.updateProduce(id, req.body);
+      const updated = await ProduceModel.findByIdAndUpdate(id, req.body, { new: true });
       return sendSuccess(res, updated, 'Produce listing updated successfully');
     } catch (err) {
       console.error('Update produce error:', err);
@@ -149,18 +169,19 @@ export class ProduceController {
     try {
       const id = req.params.id as string;
       const user = req.user!;
+      const userId = ((user as any)._id || user.id).toString();
 
-      const existing = await db.findProduceById(id);
+      const existing = await ProduceModel.findById(id);
       if (!existing) {
         return sendError(res, 'Produce listing not found', 404);
       }
 
       // Check ownership
-      if (existing.farmerId !== user.id) {
+      if (existing.farmerId.toString() !== userId) {
         return sendError(res, 'You are not authorized to delete this listing', 403);
       }
 
-      await db.deleteProduce(id);
+      await ProduceModel.findByIdAndDelete(id);
       return sendSuccess(res, null, 'Produce listing removed successfully');
     } catch (err) {
       console.error('Delete produce error:', err);
@@ -174,7 +195,8 @@ export class ProduceController {
   static async getMyListings(req: Request, res: Response) {
     try {
       const user = req.user!;
-      const listings = await db.listProduce({ farmerId: user.id });
+      const userId = (user as any)._id || user.id;
+      const listings = await ProduceModel.find({ farmerId: userId }).sort({ createdAt: -1 });
       return sendSuccess(res, listings, 'Your listings fetched successfully');
     } catch (err) {
       console.error('Get my listings error:', err);

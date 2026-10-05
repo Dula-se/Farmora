@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "833570480620",
+    "project_id": "farmora-86c19",
+    "storage_bucket": "farmora-86c19.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:833570480620:android:90f7cc55a6d0e00d3be0c9",
+        "android_client_info": {
+          "package_name": "com.farmora.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxQ3lY36eCwOmrLYHV02xq8V9alBWUkXI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

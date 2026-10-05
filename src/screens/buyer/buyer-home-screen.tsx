@@ -1,0 +1,788 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import Svg, { Path } from 'react-native-svg';
+import { fetchProduceListings, ApiProduceItem, getStoredUser, ApiUser } from '@/services/api';
+import { MARKET_CATEGORIES } from './all-categories-screen';
+import { FilterModal, FilterState } from './filter-modal';
+
+interface BuyerHomeScreenProps {
+  onOpenSearch: () => void;
+  onOpenCategories: () => void;
+  onSelectCategory: (categoryId: string, categoryName: string) => void;
+  onSelectProduct: (product: ApiProduceItem) => void;
+  onOpenProfile?: () => void;
+  onOpenOrders?: () => void;
+  onOpenChats?: () => void;
+}
+
+const NEARBY_FARMERS = [
+  {
+    id: 'f1',
+    name: 'Sunil Bandara',
+    location: 'Nuwara Eliya',
+    rating: 4.9,
+    orders: 142,
+    avatar: 'https://images.unsplash.com/photo-1544717302-de2939b7ef71?w=400&auto=format&fit=crop&q=80',
+    distance: '12 km',
+  },
+  {
+    id: 'f2',
+    name: 'Kamal Perera',
+    location: 'Kandy, Ampitiya',
+    rating: 4.8,
+    orders: 98,
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
+    distance: '18 km',
+  },
+  {
+    id: 'f3',
+    name: 'Ranjith Silva',
+    location: 'Welimada',
+    rating: 4.9,
+    orders: 215,
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&auto=format&fit=crop&q=80',
+    distance: '24 km',
+  },
+];
+
+export function BuyerHomeScreen({
+  onOpenSearch,
+  onOpenCategories,
+  onSelectCategory,
+  onSelectProduct,
+  onOpenProfile,
+  onOpenOrders,
+  onOpenChats,
+}: BuyerHomeScreenProps) {
+  const [produceList, setProduceList] = useState<ApiProduceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [user, setUser] = useState<ApiUser | null>(null);
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState('Colombo, Sri Lanka');
+
+  const loadData = useCallback(async () => {
+    try {
+      const [items, currentUser] = await Promise.all([
+        fetchProduceListings(),
+        getStoredUser(),
+      ]);
+      setProduceList(items);
+      setUser(currentUser);
+      if (currentUser?.district) {
+        setSelectedLocation(`${currentUser.district}, Sri Lanka`);
+      }
+    } catch (err) {
+      console.error('[BuyerHomeScreen] Failed to load data from MongoDB:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+      {/* Header (Screen 1 & 2 in Figma) */}
+      <View style={styles.header}>
+        {/* Top bar with logo and notifications */}
+        <View style={styles.topBar}>
+          <View style={styles.brandRow}>
+            <View style={styles.logoBadge}>
+              <Text style={styles.logoBadgeEmoji}>🌱</Text>
+            </View>
+            <Text style={styles.brandName}>Farmora</Text>
+          </View>
+
+          <View style={styles.topRightActions}>
+            <Pressable style={styles.notificationBtn} hitSlop={10}>
+              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </Svg>
+              <View style={styles.unreadDot} />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Deliver To Selector */}
+        <View style={styles.locationRow}>
+          <Text style={styles.deliverLabel}>Deliver to: </Text>
+          <Pressable style={styles.locationSelector} onPress={() => setFilterModalVisible(true)}>
+            <Text style={styles.locationText}>{selectedLocation}</Text>
+            <Text style={styles.locationArrow}> ⌄</Text>
+          </Pressable>
+        </View>
+
+        {/* Search Bar Input */}
+        <View style={styles.searchBarRow}>
+          <Pressable style={styles.searchBar} onPress={onOpenSearch}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <Text style={styles.searchPlaceholder}>
+              Search fresh vegetables, fruits...
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.filterBtn}
+            onPress={() => setFilterModalVisible(true)}>
+            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+            </Svg>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Main Body */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#386641"
+          />
+        }>
+        {/* Promotional Hero Banner (Screen 1 in Figma) */}
+        <View style={styles.heroBanner}>
+          <View style={styles.heroTextContent}>
+            <View style={styles.heroBadge}>
+              <Text style={styles.heroBadgeText}>⚡ DIRECT HARVEST</Text>
+            </View>
+            <Text style={styles.heroTitle}>Direct Harvest Reward</Text>
+            <Text style={styles.heroSub}>
+              Save up to 25% on your first bulk order directly from farmers.
+            </Text>
+            <Pressable style={styles.heroCta} onPress={onOpenCategories}>
+              <Text style={styles.heroCtaText}>Explore Now →</Text>
+            </Pressable>
+          </View>
+          <View style={styles.heroImagePlaceholder}>
+            <Text style={{ fontSize: 50 }}>🥦</Text>
+          </View>
+        </View>
+
+        {/* Categories Section */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Categories</Text>
+            <Pressable onPress={onOpenCategories} hitSlop={10}>
+              <Text style={styles.seeAllLink}>See All ›</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoriesScroll}>
+            {MARKET_CATEGORIES.slice(0, 6).map((cat) => (
+              <Pressable
+                key={cat.id}
+                style={({ pressed }) => [
+                  styles.categoryPill,
+                  pressed && styles.categoryPillPressed,
+                ]}
+                onPress={() => onSelectCategory(cat.id, cat.name)}>
+                <View style={[styles.categoryCircle, { backgroundColor: cat.color }]}>
+                  <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
+                </View>
+                <Text style={styles.categoryName} numberOfLines={1}>
+                  {cat.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Today's Fresh Harvest (Screen 1 & 2 in Figma) */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Today&apos;s Harvest</Text>
+              <Text style={styles.sectionSub}>Freshly picked and ready for dispatch</Text>
+            </View>
+            <Pressable onPress={onOpenSearch} hitSlop={10}>
+              <Text style={styles.seeAllLink}>See All ›</Text>
+            </Pressable>
+          </View>
+
+          {loading ? (
+            <View style={styles.loaderBox}>
+              <ActivityIndicator size="small" color="#386641" />
+              <Text style={styles.loaderText}>Syncing live harvest from MongoDB...</Text>
+            </View>
+          ) : produceList.length === 0 ? (
+            <View style={styles.emptyHarvest}>
+              <Text style={styles.emptyHarvestText}>No active listings in your area yet.</Text>
+            </View>
+          ) : (
+            <View style={styles.productsGrid}>
+              {produceList.map((item) => (
+                <Pressable
+                  key={item.id || item._id}
+                  style={({ pressed }) => [
+                    styles.productCard,
+                    pressed && styles.cardPressed,
+                  ]}
+                  onPress={() => onSelectProduct(item)}>
+                  {item.images && item.images[0] ? (
+                    <Image
+                      source={{ uri: item.images[0] }}
+                      style={styles.productImage}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={[styles.productImage, styles.placeholderImg]}>
+                      <Text style={{ fontSize: 32 }}>🌱</Text>
+                    </View>
+                  )}
+
+                  {item.isOrganic && (
+                    <View style={styles.organicTag}>
+                      <Text style={styles.organicTagText}>Organic</Text>
+                    </View>
+                  )}
+
+                  <View style={styles.productInfo}>
+                    <Text style={styles.productTitle} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.farmerSub} numberOfLines={1}>
+                      🧑‍🌾 {item.farmerName} • 📍 {item.locationDistrict}
+                    </Text>
+
+                    <View style={styles.productBottom}>
+                      <Text style={styles.productPrice}>
+                        Rs. {item.pricePerUnit}
+                        <Text style={styles.productUnit}> /{item.unit}</Text>
+                      </Text>
+
+                      <Pressable
+                        style={styles.addBtn}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onSelectProduct(item);
+                        }}>
+                        <Text style={styles.addBtnText}>+ Add</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Nearby Verified Farmers Section */}
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionTitle}>Nearby Farmers</Text>
+              <Text style={styles.sectionSub}>Direct from verified local growers</Text>
+            </View>
+            <Text style={styles.seeAllLink}>View on Map ›</Text>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.farmersScroll}>
+            {NEARBY_FARMERS.map((farmer) => (
+              <View key={farmer.id} style={styles.farmerCard}>
+                <Image
+                  source={{ uri: farmer.avatar }}
+                  style={styles.farmerAvatar}
+                  contentFit="cover"
+                />
+                <Text style={styles.farmerName}>{farmer.name}</Text>
+                <Text style={styles.farmerDist}>{farmer.location} • {farmer.distance}</Text>
+                <View style={styles.farmerRatingRow}>
+                  <Text style={styles.farmerRatingText}>★ {farmer.rating}</Text>
+                  <Text style={styles.farmerOrdersText}>({farmer.orders} orders)</Text>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Special Offers Banner */}
+        <View style={styles.offerBanner}>
+          <View style={styles.offerBadge}>
+            <Text style={styles.offerBadgeText}>SPECIAL DEAL</Text>
+          </View>
+          <Text style={styles.offerTitle}>Weekend Highland Veggies - 15% OFF</Text>
+          <Text style={styles.offerSub}>
+            Valid for orders placed directly from Nuwara Eliya growers today.
+          </Text>
+        </View>
+      </ScrollView>
+
+      {/* Filter Modal */}
+      <FilterModal
+        visible={filterModalVisible}
+        onClose={() => setFilterModalVisible(false)}
+        onApply={(f) => {
+          if (f.district) setSelectedLocation(`${f.district}, Sri Lanka`);
+        }}
+        onReset={() => {}}
+      />
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  header: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 12 : 8,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 10,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  logoBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: '#386641',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoBadgeEmoji: {
+    fontSize: 16,
+  },
+  brandName: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#16281D',
+    letterSpacing: -0.4,
+  },
+  topRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  notificationBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#DC2626',
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deliverLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  locationSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  locationArrow: {
+    fontSize: 12,
+    color: '#0F172A',
+  },
+  searchBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 46,
+  },
+  searchIcon: {
+    fontSize: 15,
+    marginRight: 8,
+  },
+  searchPlaceholder: {
+    fontSize: 13.5,
+    color: '#94A3B8',
+  },
+  filterBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#386641',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#386641',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  heroBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#386641',
+    marginHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 20,
+    padding: 18,
+    overflow: 'hidden',
+    shadowColor: '#386641',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  heroTextContent: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  heroBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2F5436',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginBottom: 6,
+  },
+  heroBadgeText: {
+    color: '#A7F3D0',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  heroSub: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 12,
+  },
+  heroCta: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  heroCtaText: {
+    color: '#166534',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroImagePlaceholder: {
+    width: 70,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionContainer: {
+    marginTop: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  sectionSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  seeAllLink: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#386641',
+  },
+  categoriesScroll: {
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  categoryPill: {
+    alignItems: 'center',
+    width: 64,
+  },
+  categoryPillPressed: {
+    transform: [{ scale: 0.96 }],
+  },
+  categoryCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  categoryEmoji: {
+    fontSize: 26,
+  },
+  categoryName: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#334155',
+    textAlign: 'center',
+  },
+  loaderBox: {
+    padding: 30,
+    alignItems: 'center',
+    gap: 8,
+  },
+  loaderText: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  emptyHarvest: {
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  emptyHarvestText: {
+    color: '#94A3B8',
+    fontSize: 13,
+  },
+  productsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  productCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E8ECE8',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
+    position: 'relative',
+  },
+  cardPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  productImage: {
+    width: '100%',
+    height: 125,
+    backgroundColor: '#F1F5F9',
+  },
+  placeholderImg: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  organicTag: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#166534',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+  },
+  organicTagText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  productInfo: {
+    padding: 10,
+  },
+  productTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#0F172A',
+    lineHeight: 18,
+    height: 36,
+  },
+  farmerSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 3,
+    marginBottom: 6,
+  },
+  productBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  productPrice: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  productUnit: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748B',
+  },
+  addBtn: {
+    backgroundColor: '#EBF5EE',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  addBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#386641',
+  },
+  farmersScroll: {
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  farmerCard: {
+    width: 140,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8ECE8',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  farmerAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#E2E8F0',
+    marginBottom: 8,
+  },
+  farmerName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  farmerDist: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  farmerRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+  },
+  farmerRatingText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#D97706',
+  },
+  farmerOrdersText: {
+    fontSize: 10,
+    color: '#94A3B8',
+  },
+  offerBanner: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 20,
+    marginTop: 24,
+  },
+  offerBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F59E0B',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+    marginBottom: 6,
+  },
+  offerBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  offerTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#92400E',
+    marginBottom: 2,
+  },
+  offerSub: {
+    fontSize: 12,
+    color: '#B45309',
+    lineHeight: 16,
+  },
+});
