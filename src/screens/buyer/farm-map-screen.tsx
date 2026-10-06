@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
+import { LocationPermissionModal, NoFarmsFoundModal } from './location-permission-modal';
 
 export interface FarmLocation {
   id: string;
@@ -96,17 +97,21 @@ interface FarmMapScreenProps {
   onBack: () => void;
   onSelectFarmProduct?: (cropName: string) => void;
   onChatFarmer?: (farmerPhone: string) => void;
+  onOpenFarmerMatching?: () => void;
 }
 
 export function FarmMapScreen({
   onBack,
   onSelectFarmProduct,
   onChatFarmer,
+  onOpenFarmerMatching,
 }: FarmMapScreenProps) {
-  const [activeView, setActiveView] = useState<'map' | 'list'>('map');
+  const [activeView, setActiveView] = useState<'map' | 'list'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(MOCK_FARMS[0]);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showNoFarmsModal, setShowNoFarmsModal] = useState(false);
   const [savedFarms, setSavedFarms] = useState<string[]>([]);
 
   // Filter States
@@ -191,17 +196,17 @@ export function FarmMapScreen({
       {/* Toggle View Tabs: Map vs List */}
       <View style={styles.viewToggleRow}>
         <Pressable
-          style={[styles.toggleBtn, activeView === 'map' && styles.toggleBtnActive]}
-          onPress={() => setActiveView('map')}>
-          <Text style={[styles.toggleBtnText, activeView === 'map' && styles.toggleBtnTextActive]}>
-            🗺️ Map View
-          </Text>
-        </Pressable>
-        <Pressable
           style={[styles.toggleBtn, activeView === 'list' && styles.toggleBtnActive]}
           onPress={() => setActiveView('list')}>
           <Text style={[styles.toggleBtnText, activeView === 'list' && styles.toggleBtnTextActive]}>
-            📋 Nearby Farms ({filteredFarms.length})
+            📋 Farms in Your Range ({filteredFarms.length})
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toggleBtn, activeView === 'map' && styles.toggleBtnActive]}
+          onPress={() => setActiveView('map')}>
+          <Text style={[styles.toggleBtnText, activeView === 'map' && styles.toggleBtnTextActive]}>
+            🗺️ Interactive Map
           </Text>
         </Pressable>
       </View>
@@ -336,63 +341,135 @@ export function FarmMapScreen({
           )}
         </View>
       ) : (
-        /* List View (Matching Figma Screen 10) */
+        /* List View (Matching Figma Screen 1) */
         <ScrollView
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}>
-          {filteredFarms.map((farm) => (
-            <View key={farm.id} style={styles.farmCard}>
-              <Image
-                source={{ uri: farm.image }}
-                style={styles.farmCardImage}
-                contentFit="cover"
-              />
-              <View style={styles.farmCardBody}>
-                <View style={styles.farmCardTitleRow}>
-                  <Text style={styles.farmCardTitle}>{farm.name}</Text>
-                  <View style={styles.distanceBadge}>
-                    <Text style={styles.distanceBadgeText}>{farm.distanceKm} km</Text>
+          {/* Top Mini Map Preview Card with Live Route Line */}
+          <View style={styles.topMiniMapCard}>
+            <View style={styles.miniMapGraphic}>
+              <Svg width="100%" height="110" viewBox="0 0 340 110">
+                <Path d="M 0 55 L 340 55" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
+                <Path d="M 170 0 L 170 110" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
+                {/* Connected Transit Route */}
+                <Path d="M 30 80 L 110 30 L 230 45 L 290 85" stroke="#22C55E" strokeWidth={4} fill="none" strokeLinecap="round" />
+                {/* Pins */}
+                <Path d="M 30 80 a 6 6 0 1 0 0.01 0" fill="#2563EB" />
+                <Path d="M 110 30 a 6 6 0 1 0 0.01 0" fill="#22C55E" />
+                <Path d="M 230 45 a 6 6 0 1 0 0.01 0" fill="#F59E0B" />
+                <Path d="M 290 85 a 6 6 0 1 0 0.01 0" fill="#22C55E" />
+              </Svg>
+            </View>
+            <View style={styles.miniMapFooter}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.miniMapTitle}>Regional Delivery Network</Text>
+                <Text style={styles.miniMapSub}>Farms within 50km radius • Active dispatch</Text>
+              </View>
+              <Pressable
+                style={styles.expandMapBtn}
+                onPress={() => setActiveView('map')}>
+                <Text style={styles.expandMapText}>Open Map ↗</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Quick AI Match Banner */}
+          {onOpenFarmerMatching && (
+            <Pressable
+              style={styles.aiMatchBanner}
+              onPress={onOpenFarmerMatching}>
+              <View style={styles.aiMatchBadge}>
+                <Text style={styles.aiMatchBadgeText}>AI SEARCH</Text>
+              </View>
+              <View style={{ flex: 1, marginHorizontal: 10 }}>
+                <Text style={styles.aiMatchTitle}>Find Custom Farm Match</Text>
+                <Text style={styles.aiMatchSub}>Let our engine select suppliers matching your criteria</Text>
+              </View>
+              <Text style={styles.aiMatchArrow}>→</Text>
+            </Pressable>
+          )}
+
+          {/* Header Row: "FARMS IN YOUR RANGE" */}
+          <View style={styles.rangeHeaderRow}>
+            <Text style={styles.rangeHeaderTitle}>
+              FARMS IN YOUR RANGE <Text style={{ color: '#2E7D32' }}>({filteredFarms.length})</Text>
+            </Text>
+            <Pressable onPress={() => setShowLocationModal(true)}>
+              <Text style={styles.changeLocText}>📍 Change Region</Text>
+            </Pressable>
+          </View>
+
+          {filteredFarms.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>📍</Text>
+              <Text style={styles.emptyTitle}>No Farms Found In This Range</Text>
+              <Text style={styles.emptySub}>
+                Try widening your distance filter or changing districts.
+              </Text>
+              <Pressable
+                style={styles.expandRadiusBtn}
+                onPress={() => {
+                  setMaxDistance(100);
+                  setOnlyOrganic(false);
+                }}>
+                <Text style={styles.expandRadiusText}>Increase Search Radius (100km)</Text>
+              </Pressable>
+            </View>
+          ) : (
+            filteredFarms.map((farm) => (
+              <View key={farm.id} style={styles.farmCard}>
+                <Image
+                  source={{ uri: farm.image }}
+                  style={styles.farmCardImage}
+                  contentFit="cover"
+                />
+                <View style={styles.farmCardBody}>
+                  <View style={styles.farmCardTitleRow}>
+                    <Text style={styles.farmCardTitle}>{farm.name}</Text>
+                    <View style={styles.distanceBadge}>
+                      <Text style={styles.distanceBadgeText}>{farm.distanceKm} km</Text>
+                    </View>
                   </View>
-                </View>
 
-                <Text style={styles.farmCardLocation}>
-                  📍 {farm.address}, {farm.district}
-                </Text>
+                  <Text style={styles.farmCardLocation}>
+                    📍 {farm.address}, {farm.district} • ⚡ {farm.driveTimeMin} min
+                  </Text>
 
-                <View style={styles.cropsRow}>
-                  {farm.crops.map((crop) => (
-                    <Pressable
-                      key={crop}
-                      style={styles.cropPill}
-                      onPress={() => onSelectFarmProduct?.(crop)}>
-                      <Text style={styles.cropPillText}>{crop}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                  <View style={styles.cropsRow}>
+                    {farm.crops.map((crop) => (
+                      <Pressable
+                        key={crop}
+                        style={styles.cropPill}
+                        onPress={() => onSelectFarmProduct?.(crop)}>
+                        <Text style={styles.cropPillText}>{crop}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
 
-                <View style={styles.farmCardBottomRow}>
-                  <Text style={styles.ratingLabel}>★ {farm.rating} ({farm.reviewsCount})</Text>
+                  <View style={styles.farmCardBottomRow}>
+                    <Text style={styles.ratingLabel}>★ {farm.rating} ({farm.reviewsCount})</Text>
 
-                  <View style={styles.cardActions}>
-                    <Pressable
-                      style={styles.viewOnMapBtn}
-                      onPress={() => {
-                        setSelectedFarm(farm);
-                        setActiveView('map');
-                      }}>
-                      <Text style={styles.viewOnMapText}>View on Map</Text>
-                    </Pressable>
+                    <View style={styles.cardActions}>
+                      <Pressable
+                        style={styles.viewOnMapBtn}
+                        onPress={() => {
+                          setSelectedFarm(farm);
+                          setActiveView('map');
+                        }}>
+                        <Text style={styles.viewOnMapText}>View on Map</Text>
+                      </Pressable>
 
-                    <Pressable
-                      style={styles.directionsBtnSmall}
-                      onPress={() => openGoogleMapsDirections(farm)}>
-                      <Text style={styles.directionsBtnSmallText}>Directions</Text>
-                    </Pressable>
+                      <Pressable
+                        style={styles.directionsBtnSmall}
+                        onPress={() => openGoogleMapsDirections(farm)}>
+                        <Text style={styles.directionsBtnSmallText}>Directions</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </ScrollView>
       )}
 
@@ -496,6 +573,38 @@ export function FarmMapScreen({
           </View>
         </View>
       </Modal>
+
+      {/* Location Permission Modal */}
+      <LocationPermissionModal
+        visible={showLocationModal}
+        onAllowLocation={() => {
+          setShowLocationModal(false);
+        }}
+        onManualLocation={() => {
+          setShowLocationModal(false);
+          setShowFiltersModal(true);
+        }}
+        onClose={() => setShowLocationModal(false)}
+      />
+
+      {/* No Farms Modal */}
+      <NoFarmsFoundModal
+        visible={showNoFarmsModal}
+        searchRadiusKm={maxDistance}
+        onIncreaseRadius={() => {
+          setMaxDistance(100);
+          setShowNoFarmsModal(false);
+        }}
+        onChangeLocation={() => {
+          setShowNoFarmsModal(false);
+          setShowFiltersModal(true);
+        }}
+        onExploreAll={() => {
+          setMaxDistance(200);
+          setShowNoFarmsModal(false);
+        }}
+        onClose={() => setShowNoFarmsModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -765,6 +874,127 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 14,
     paddingBottom: 40,
+  },
+  topMiniMapCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  miniMapGraphic: {
+    height: 100,
+    backgroundColor: '#F1F5F9',
+  },
+  miniMapFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+  },
+  miniMapTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  miniMapSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  expandMapBtn: {
+    backgroundColor: '#2E7D32',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  expandMapText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  aiMatchBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B4332',
+    padding: 12,
+    borderRadius: 12,
+  },
+  aiMatchBadge: {
+    backgroundColor: '#2D6A4F',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  aiMatchBadgeText: {
+    color: '#D8F3DC',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  aiMatchTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  aiMatchSub: {
+    fontSize: 10,
+    color: '#D8F3DC',
+  },
+  aiMatchArrow: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  rangeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  rangeHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  changeLocText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  emptyContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  emptyEmoji: {
+    fontSize: 40,
+    marginBottom: 8,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  emptySub: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  expandRadiusBtn: {
+    backgroundColor: '#2E7D32',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  expandRadiusText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   farmCard: {
     backgroundColor: '#FFFFFF',

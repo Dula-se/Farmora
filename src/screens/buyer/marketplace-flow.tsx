@@ -18,6 +18,8 @@ import { SimilarProductsScreen } from './similar-products-screen';
 import { CompareProductsScreen } from './compare-products-screen';
 import { WishlistScreen } from './wishlist-screen';
 import { FarmMapScreen } from './farm-map-screen';
+import { FarmerMatchingFlow } from './farmer-matching-flow';
+import { ProductScannerFlow } from './product-scanner-flow';
 
 export type BuyerScreenView =
   | 'home'
@@ -29,7 +31,9 @@ export type BuyerScreenView =
   | 'similar-products'
   | 'compare-products'
   | 'wishlist'
-  | 'farm-map';
+  | 'farm-map'
+  | 'farmer-matching'
+  | 'product-scanner';
 
 export type BuyerTab = 'home' | 'market' | 'farms' | 'wishlist' | 'profile';
 
@@ -71,7 +75,9 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     currentView === 'product-detail' ||
     currentView === 'reviews' ||
     currentView === 'compare-products' ||
-    currentView === 'farm-map';
+    currentView === 'farm-map' ||
+    currentView === 'farmer-matching' ||
+    currentView === 'product-scanner';
 
   return (
     <View style={styles.container}>
@@ -83,6 +89,9 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenCategories={() => setCurrentView('categories')}
             onSelectCategory={handleSelectCategory}
             onSelectProduct={handleSelectProduct}
+            onOpenFarmsMap={() => setCurrentView('farm-map')}
+            onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
+            onOpenProductScanner={() => setCurrentView('product-scanner')}
           />
         )}
 
@@ -163,7 +172,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <WishlistScreen
             onBack={() => setCurrentView('home')}
             onAddToCart={(item) => {
-              // Add to cart toast / handler
+              alert(`Added ${item.title} to cart`);
             }}
           />
         )}
@@ -173,6 +182,28 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onBack={() => setCurrentView('home')}
             onChatFarmer={(phone) => {
               alert(`Starting chat with farmer at ${phone}`);
+            }}
+            onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
+          />
+        )}
+
+        {currentView === 'farmer-matching' && (
+          <FarmerMatchingFlow
+            onBack={() => setCurrentView('home')}
+            onOrderFarmer={(farmer) => {
+              alert(`Order confirmed with ${farmer.name}!`);
+            }}
+            onChatFarmer={(fId) => {
+              alert(`Opening direct chat with ${fId}`);
+            }}
+          />
+        )}
+
+        {currentView === 'product-scanner' && (
+          <ProductScannerFlow
+            onBack={() => setCurrentView('home')}
+            onExploreMatchingFarmers={(_crop) => {
+              setCurrentView('farmer-matching');
             }}
           />
         )}

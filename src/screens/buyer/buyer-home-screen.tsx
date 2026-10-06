@@ -16,6 +16,7 @@ import Svg, { Path } from 'react-native-svg';
 import { fetchProduceListings, ApiProduceItem, getStoredUser, ApiUser } from '@/services/api';
 import { MARKET_CATEGORIES } from './all-categories-screen';
 import { FilterModal, FilterState } from './filter-modal';
+import { LocationPermissionModal } from './location-permission-modal';
 
 interface BuyerHomeScreenProps {
   onOpenSearch: () => void;
@@ -25,6 +26,9 @@ interface BuyerHomeScreenProps {
   onOpenProfile?: () => void;
   onOpenOrders?: () => void;
   onOpenChats?: () => void;
+  onOpenFarmsMap?: () => void;
+  onOpenFarmerMatching?: () => void;
+  onOpenProductScanner?: () => void;
 }
 
 const NEARBY_FARMERS = [
@@ -65,12 +69,16 @@ export function BuyerHomeScreen({
   onOpenProfile,
   onOpenOrders,
   onOpenChats,
+  onOpenFarmsMap,
+  onOpenFarmerMatching,
+  onOpenProductScanner,
 }: BuyerHomeScreenProps) {
   const [produceList, setProduceList] = useState<ApiProduceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState('Colombo, Sri Lanka');
 
   const loadData = useCallback(async () => {
@@ -130,7 +138,7 @@ export function BuyerHomeScreen({
         {/* Deliver To Selector */}
         <View style={styles.locationRow}>
           <Text style={styles.deliverLabel}>Deliver to: </Text>
-          <Pressable style={styles.locationSelector} onPress={() => setFilterModalVisible(true)}>
+          <Pressable style={styles.locationSelector} onPress={() => setShowLocationModal(true)}>
             <Text style={styles.locationText}>{selectedLocation}</Text>
             <Text style={styles.locationArrow}> ⌄</Text>
           </Pressable>
@@ -183,6 +191,35 @@ export function BuyerHomeScreen({
           <View style={styles.heroImagePlaceholder}>
             <Text style={{ fontSize: 50 }}>🥦</Text>
           </View>
+        </View>
+
+        {/* Smart Farmer & Produce AI Tools Strip */}
+        <View style={styles.quickToolsContainer}>
+          <Pressable
+            style={styles.quickToolCard}
+            onPress={onOpenFarmerMatching}>
+            <View style={[styles.quickToolIcon, { backgroundColor: '#DCFCE7' }]}>
+              <Text style={{ fontSize: 18 }}>🎯</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.quickToolTitle}>AI Farmer Match</Text>
+              <Text style={styles.quickToolSub}>Find best farm suppliers</Text>
+            </View>
+            <Text style={styles.quickToolArrow}>›</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.quickToolCard}
+            onPress={onOpenProductScanner}>
+            <View style={[styles.quickToolIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Text style={{ fontSize: 18 }}>📸</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.quickToolTitle}>Produce Scanner</Text>
+              <Text style={styles.quickToolSub}>Quality & price audit</Text>
+            </View>
+            <Text style={styles.quickToolArrow}>›</Text>
+          </Pressable>
         </View>
 
         {/* Categories Section */}
@@ -303,7 +340,9 @@ export function BuyerHomeScreen({
               <Text style={styles.sectionTitle}>Nearby Farmers</Text>
               <Text style={styles.sectionSub}>Direct from verified local growers</Text>
             </View>
-            <Text style={styles.seeAllLink}>View on Map ›</Text>
+            <Pressable onPress={onOpenFarmsMap} hitSlop={10}>
+              <Text style={styles.seeAllLink}>View on Map ›</Text>
+            </Pressable>
           </View>
 
           <ScrollView
@@ -311,7 +350,10 @@ export function BuyerHomeScreen({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.farmersScroll}>
             {NEARBY_FARMERS.map((farmer) => (
-              <View key={farmer.id} style={styles.farmerCard}>
+              <Pressable
+                key={farmer.id}
+                style={styles.farmerCard}
+                onPress={onOpenFarmsMap}>
                 <Image
                   source={{ uri: farmer.avatar }}
                   style={styles.farmerAvatar}
@@ -323,7 +365,7 @@ export function BuyerHomeScreen({
                   <Text style={styles.farmerRatingText}>★ {farmer.rating}</Text>
                   <Text style={styles.farmerOrdersText}>({farmer.orders} orders)</Text>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </ScrollView>
         </View>
@@ -348,6 +390,20 @@ export function BuyerHomeScreen({
           if (f.district) setSelectedLocation(`${f.district}, Sri Lanka`);
         }}
         onReset={() => {}}
+      />
+
+      {/* Location Permission Prompt Modal */}
+      <LocationPermissionModal
+        visible={showLocationModal}
+        onAllowLocation={() => {
+          setShowLocationModal(false);
+          setSelectedLocation('Central Province, Sri Lanka');
+        }}
+        onManualLocation={() => {
+          setShowLocationModal(false);
+          setFilterModalVisible(true);
+        }}
+        onClose={() => setShowLocationModal(false)}
       />
     </SafeAreaView>
   );
@@ -784,5 +840,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B45309',
     lineHeight: 16,
+  },
+  // Quick tools strip
+  quickToolsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    marginTop: 16,
+  },
+  quickToolCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+    gap: 10,
+  },
+  quickToolIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickToolTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  quickToolSub: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  quickToolArrow: {
+    fontSize: 16,
+    color: '#94A3B8',
+    fontWeight: '700',
   },
 });
