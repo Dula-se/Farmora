@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
 
@@ -24,6 +24,13 @@ export function PriceTrendsModal({
   onOrderNow,
 }: PriceTrendsModalProps) {
   const [activeRange, setActiveRange] = useState<'30d' | '60d' | '1y'>('30d');
+  const insets = useSafeAreaInsets();
+
+  // Deterministic top inset ensuring nav bar NEVER gets pushed behind the status bar/notch
+  const topInset = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
+  );
 
   const basePrice = product.pricePerUnit || 320;
   const lowest = Math.round(basePrice * 0.88);
@@ -33,24 +40,25 @@ export function PriceTrendsModal({
   const directSavings = Math.round(((pettahPrice - basePrice) / pettahPrice) * 100);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+    <View style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={true} />
 
-      {/* Top Header */}
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
-          <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M19 12H5M12 19l-7-7 7-7" />
-          </Svg>
-        </Pressable>
-        <Text style={styles.headerTitle}>Price Trends</Text>
-        <Pressable hitSlop={12} style={styles.backBtn}>
-          <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-            <Path d="M16 6l-4-4-4 4" />
-            <Path d="M12 2v13" />
-          </Svg>
-        </Pressable>
+      {/* Top Header - Guaranteed visible & fully clickable below status bar/notch */}
+      <View style={[styles.headerWrapper, { paddingTop: topInset }]}>
+        <View style={styles.header}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Go back">
+            <Svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M19 12H5M12 19l-7-7 7-7" />
+            </Svg>
+          </Pressable>
+          <Text style={styles.headerTitle}>Price Trends</Text>
+          <View style={styles.headerRightSpace} />
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -193,7 +201,7 @@ export function PriceTrendsModal({
           <Text style={styles.orderBtnText}>Order at Direct Farm Price (Rs. {basePrice}/kg)</Text>
         </Pressable>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -202,28 +210,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAFBF9',
   },
-  header: {
-    height: 52,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+  headerWrapper: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 4,
+    zIndex: 100,
+  },
+  header: {
+    height: 56,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F8FAFC',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
     color: '#0F172A',
+  },
+  headerRightSpace: {
+    width: 42,
   },
   scrollContent: {
     padding: 20,

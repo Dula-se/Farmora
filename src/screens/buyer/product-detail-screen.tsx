@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
+import { useCart } from '@/context/cart-context';
 import { ImageGalleryModal } from './image-gallery-modal';
 import { PriceTrendsModal } from './price-trends-modal';
 import { SavedToWishlistModal } from './wishlist-screen';
@@ -27,6 +28,7 @@ interface ProductDetailScreenProps {
   onOpenCompare?: (product: ApiProduceItem) => void;
   onOpenFarmMap?: (product: ApiProduceItem) => void;
   onOpenWishlist?: () => void;
+  onOpenCart?: () => void;
 }
 
 export function ProductDetailScreen({
@@ -39,13 +41,16 @@ export function ProductDetailScreen({
   onOpenCompare,
   onOpenFarmMap,
   onOpenWishlist,
+  onOpenCart,
 }: ProductDetailScreenProps) {
+  const { addToCart, totalCount: cartTotalCount } = useCart();
   const [selectedQty, setSelectedQty] = useState(product.minimumOrderQuantity || 10);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [showPriceTrends, setShowPriceTrends] = useState(false);
   const [showSavedWishlistModal, setShowSavedWishlistModal] = useState(false);
+  const [addedToCartToast, setAddedToCartToast] = useState(false);
 
   const minQty = product.minimumOrderQuantity || 1;
   const maxQty = product.availableQuantity || 500;
@@ -71,6 +76,25 @@ export function ProductDetailScreen({
     }
   };
 
+  const handleAddToCartPress = () => {
+    addToCart({
+      id: product.id || (product as any)._id,
+      title: product.title,
+      pricePerUnit: product.pricePerUnit,
+      unit: unit,
+      farmerName: product.farmerName,
+      locationDistrict: product.locationDistrict,
+      locationCity: product.locationCity,
+      image: (product.images && product.images[0]) || '',
+      quantity: selectedQty,
+      maxQuantity: maxQty,
+      category: product.category,
+      isOrganic: product.isOrganic,
+    });
+    setAddedToCartToast(true);
+    setTimeout(() => setAddedToCartToast(false), 2000);
+  };
+
   const totalPrice = selectedQty * product.pricePerUnit;
   const productImages = product.images && product.images.length > 0
     ? product.images
@@ -89,19 +113,24 @@ export function ProductDetailScreen({
         </Pressable>
 
         <View style={styles.topRightActions}>
-          {/* Wishlist Link button */}
-          {onOpenWishlist && (
-            <Pressable
-              onPress={onOpenWishlist}
-              hitSlop={12}
-              style={styles.navBtn}>
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-                <Path d="M3 6h18" />
-                <Path d="M16 10a4 4 0 0 1-8 0" />
-              </Svg>
-            </Pressable>
-          )}
+          {/* Cart Link button with live counter */}
+          <Pressable
+            onPress={onOpenCart || onBack}
+            hitSlop={12}
+            style={styles.navBtn}>
+            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+              <Path d="M3 6h18" />
+              <Path d="M16 10a4 4 0 0 1-8 0" />
+            </Svg>
+            {cartTotalCount > 0 && (
+              <View style={styles.topNavCartBadge}>
+                <Text style={styles.topNavCartBadgeText}>
+                  {cartTotalCount > 9 ? '9+' : cartTotalCount}
+                </Text>
+              </View>
+            )}
+          </Pressable>
 
           {/* Heart / Favorite button */}
           <Pressable
@@ -359,6 +388,20 @@ export function ProductDetailScreen({
           </Pressable>
         </View>
 
+        {/* Add to Cart button */}
+        <Pressable
+          style={[styles.addToCartDetailBtn, addedToCartToast && styles.addToCartDetailBtnSuccess]}
+          onPress={handleAddToCartPress}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={addedToCartToast ? '#16A34A' : '#2E7D32'} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+            <Path d="M3 6h18" />
+            <Path d="M16 10a4 4 0 0 1-8 0" />
+          </Svg>
+          <Text style={[styles.addToCartDetailBtnText, addedToCartToast && styles.addToCartDetailBtnTextSuccess]}>
+            {addedToCartToast ? 'Added!' : '+ Cart'}
+          </Text>
+        </Pressable>
+
         <Pressable
           style={styles.orderBtn}
           onPress={() => onOrderNow?.(product, selectedQty)}>
@@ -380,6 +423,7 @@ export function ProductDetailScreen({
       <Modal
         visible={showPriceTrends}
         animationType="slide"
+        statusBarTranslucent={true}
         onRequestClose={() => setShowPriceTrends(false)}>
         <PriceTrendsModal
           product={product}
@@ -884,5 +928,46 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 14,
     fontWeight: '600',
+  },
+  topNavCartBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#2E7D32',
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  topNavCartBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  addToCartDetailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#DCFCE7',
+    height: 48,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  addToCartDetailBtnSuccess: {
+    backgroundColor: '#BBF7D0',
+  },
+  addToCartDetailBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  addToCartDetailBtnTextSuccess: {
+    color: '#15803D',
   },
 });

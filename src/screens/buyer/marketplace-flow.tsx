@@ -20,6 +20,7 @@ import { WishlistScreen } from './wishlist-screen';
 import { FarmMapScreen } from './farm-map-screen';
 import { FarmerMatchingFlow } from './farmer-matching-flow';
 import { ProductScannerFlow } from './product-scanner-flow';
+import { CartScreen } from './cart-screen';
 
 export type BuyerScreenView =
   | 'home'
@@ -33,7 +34,8 @@ export type BuyerScreenView =
   | 'wishlist'
   | 'farm-map'
   | 'farmer-matching'
-  | 'product-scanner';
+  | 'product-scanner'
+  | 'cart';
 
 export type BuyerTab = 'home' | 'market' | 'farms' | 'wishlist' | 'profile';
 
@@ -77,7 +79,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     currentView === 'compare-products' ||
     currentView === 'farm-map' ||
     currentView === 'farmer-matching' ||
-    currentView === 'product-scanner';
+    currentView === 'product-scanner' ||
+    currentView === 'cart';
 
   return (
     <View style={styles.container}>
@@ -92,6 +95,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenFarmsMap={() => setCurrentView('farm-map')}
             onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
             onOpenProductScanner={() => setCurrentView('product-scanner')}
+            onOpenWishlist={() => setCurrentView('wishlist')}
+            onOpenCart={() => setCurrentView('cart')}
           />
         )}
 
@@ -135,6 +140,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenCompare={() => setCurrentView('compare-products')}
             onOpenFarmMap={() => setCurrentView('farm-map')}
             onOpenWishlist={() => setCurrentView('wishlist')}
+            onOpenCart={() => setCurrentView('cart')}
           />
         )}
 
@@ -171,9 +177,14 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
         {currentView === 'wishlist' && (
           <WishlistScreen
             onBack={() => setCurrentView('home')}
-            onAddToCart={(item) => {
-              alert(`Added ${item.title} to cart`);
-            }}
+            onViewCart={() => setCurrentView('cart')}
+          />
+        )}
+
+        {currentView === 'cart' && (
+          <CartScreen
+            onBack={() => setCurrentView('home')}
+            onExploreMarketplace={() => setCurrentView('home')}
           />
         )}
 

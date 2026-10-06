@@ -13,7 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { fetchProduceListings, ApiProduceItem } from '@/services/api';
+import {
+  fetchProduceListings,
+  ApiProduceItem,
+  fetchSearchHistory,
+  saveSearchHistory,
+  clearSearchHistory,
+  fetchPopularSearches,
+} from '@/services/api';
 import { FilterModal, FilterState } from './filter-modal';
 import { SortModal, SortOption } from './sort-modal';
 
@@ -25,7 +32,7 @@ interface SearchScreenProps {
 }
 
 const DEFAULT_RECENTS = ['Organic Tomatoes', 'Bell Pepper', 'Fresh Carrots', 'Ceylon Papaya'];
-const POPULAR_TAGS = ['Organic Veg', 'Fresh Coconuts', 'Ceylon Cinnamon', 'Red Rice', 'Potatoes'];
+const DEFAULT_POPULAR = ['Organic Veg', 'Fresh Coconuts', 'Ceylon Cinnamon', 'Red Rice', 'Potatoes'];
 
 export function SearchScreen({
   initialQuery = '',
@@ -35,6 +42,7 @@ export function SearchScreen({
 }: SearchScreenProps) {
   const [query, setQuery] = useState(initialQuery);
   const [recentSearches, setRecentSearches] = useState<string[]>(DEFAULT_RECENTS);
+  const [popularTags, setPopularTags] = useState<string[]>(DEFAULT_POPULAR);
   const [results, setResults] = useState<ApiProduceItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'farmers' | 'districts'>('all');
@@ -42,6 +50,25 @@ export function SearchScreen({
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [activeSort, setActiveSort] = useState<SortOption>('newest');
   const [filters, setFilters] = useState<Partial<FilterState>>({});
+
+  useEffect(() => {
+    // Load recent searches and popular tags from backend
+    const loadSearchMetadata = async () => {
+      try {
+        const history = await fetchSearchHistory();
+        if (history && history.length > 0) {
+          setRecentSearches(history.map((h: any) => h.query));
+        }
+        const popular = await fetchPopularSearches();
+        if (popular && popular.length > 0) {
+          setPopularTags(popular.map((p: any) => p.query));
+        }
+      } catch {
+        // Fallback to defaults
+      }
+    };
+    loadSearchMetadata();
+  }, []);
 
   const executeSearch = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim()) {
@@ -72,16 +99,16 @@ export function SearchScreen({
 
       setResults(sorted);
 
-      // Save to recents
-      if (!recentSearches.includes(searchQuery.trim())) {
-        setRecentSearches((prev) => [searchQuery.trim(), ...prev.slice(0, 5)]);
-      }
+      // Save to recents locally and in MongoDB
+      const trimmed = searchQuery.trim();
+      setRecentSearches((prev) => [trimmed, ...prev.filter((q) => q !== trimmed).slice(0, 5)]);
+      saveSearchHistory(trimmed, undefined, filters.district, sorted.length).catch(() => {});
     } catch (err) {
       console.error('[SearchScreen] Error:', err);
     } finally {
       setLoading(false);
     }
-  }, [filters, activeSort, recentSearches]);
+  }, [filters, activeSort]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -96,6 +123,7 @@ export function SearchScreen({
 
   const handleClearRecents = () => {
     setRecentSearches([]);
+    clearSearchHistory().catch(() => {});
   };
 
   const handleRemoveRecent = (item: string) => {
@@ -226,7 +254,7 @@ export function SearchScreen({
                 <View style={styles.popularBox}>
                   <Text style={styles.popularLabel}>Popular searches right now:</Text>
                   <View style={styles.chipsRow}>
-                    {POPULAR_TAGS.map((tag) => (
+                    {popularTags.map((tag: string) => (
                       <Pressable
                         key={tag}
                         style={styles.popularChip}
@@ -376,7 +404,7 @@ export function SearchScreen({
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionHeading}>POPULAR SEARCHES</Text>
             <View style={styles.chipsRow}>
-              {POPULAR_TAGS.map((tag) => (
+              {popularTags.map((tag) => (
                 <Pressable
                   key={tag}
                   style={styles.suggestedChip}

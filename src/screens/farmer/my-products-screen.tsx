@@ -15,6 +15,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { fetchMyListings, ApiProduceItem } from '@/services/api';
+import { UpdateStockModal } from './update-stock-modal';
+import { DeleteArchiveModal } from './delete-archive-modal';
+import { EditProductScreen } from './edit-product-screen';
+import { ProductPerformanceScreen } from './product-performance-screen';
+import { ProductPublishedModal } from './product-published-modal';
 
 interface MyProductsScreenProps {
   onAddProduct: () => void;
@@ -42,6 +47,13 @@ export function MyProductsScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(newlyAddedTitle || null);
+  const [showPublishedModal, setShowPublishedModal] = useState<boolean>(Boolean(newlyAddedTitle));
+
+  // Modal / Subscreen states
+  const [stockProduct, setStockProduct] = useState<ApiProduceItem | null>(null);
+  const [deleteProduct, setDeleteProduct] = useState<ApiProduceItem | null>(null);
+  const [perfProduct, setPerfProduct] = useState<ApiProduceItem | null>(null);
+  const [editingItem, setEditingItem] = useState<ApiProduceItem | null>(null);
 
   const loadProducts = async () => {
     try {
@@ -228,11 +240,12 @@ export function MyProductsScreen({
             const isNewlyAdded = newlyAddedTitle === item.title;
 
             return (
-              <View
+              <Pressable
                 style={[
                   styles.productCard,
                   isNewlyAdded && styles.productCardHighlighted,
-                ]}>
+                ]}
+                onPress={() => setPerfProduct(item)}>
                 {/* Thumbnail */}
                 <View style={styles.thumbnailBox}>
                   {item.images && item.images[0] ? (
@@ -259,15 +272,28 @@ export function MyProductsScreen({
                     <Text style={styles.productTitle} numberOfLines={1}>
                       {item.title}
                     </Text>
-                    <Pressable
-                      hitSlop={8}
-                      style={styles.editBtn}
-                      onPress={() => onEditProduct?.(item)}>
-                      <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                        <Path d="M12 20h9" />
-                        <Path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                      </Svg>
-                    </Pressable>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {/* Edit Button */}
+                      <Pressable
+                        hitSlop={8}
+                        style={styles.editBtn}
+                        onPress={() => setEditingItem(item)}>
+                        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <Path d="M12 20h9" />
+                          <Path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </Svg>
+                      </Pressable>
+
+                      {/* Archive / Delete Button */}
+                      <Pressable
+                        hitSlop={8}
+                        style={[styles.editBtn, { backgroundColor: '#FEE2E2' }]}
+                        onPress={() => setDeleteProduct(item)}>
+                        <Svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <Path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </Svg>
+                      </Pressable>
+                    </View>
                   </View>
 
                   <Text style={styles.priceText}>
@@ -275,9 +301,10 @@ export function MyProductsScreen({
                     <Text style={styles.unitText}> /{item.unit}</Text>
                   </Text>
 
-                  {/* Stock Row & Restock button */}
+                  {/* Stock Row & Restock / Update button */}
                   <View style={styles.stockRow}>
-                    <View
+                    <Pressable
+                      onPress={() => setStockProduct(item)}
                       style={[
                         styles.stockBadge,
                         isOutOfStock ? styles.stockBadgeOut : styles.stockBadgeIn,
@@ -291,22 +318,18 @@ export function MyProductsScreen({
                           ? '○ Out of Stock'
                           : `● ${item.availableQuantity} ${item.unit} in stock`}
                       </Text>
-                    </View>
+                    </Pressable>
 
-                    {isOutOfStock ? (
-                      <Pressable
-                        style={styles.restockBtn}
-                        onPress={() => handleRestock(item.id || item._id || '')}>
-                        <Text style={styles.restockBtnText}>Restock</Text>
-                      </Pressable>
-                    ) : (
-                      <View style={styles.activeTag}>
-                        <Text style={styles.activeTagText}>Active</Text>
-                      </View>
-                    )}
+                    <Pressable
+                      style={styles.restockBtn}
+                      onPress={() => setStockProduct(item)}>
+                      <Text style={styles.restockBtnText}>
+                        {isOutOfStock ? 'Restock' : 'Update Stock'}
+                      </Text>
+                    </Pressable>
                   </View>
                 </View>
-              </View>
+              </Pressable>
             );
           }}
         />
@@ -317,6 +340,73 @@ export function MyProductsScreen({
         <Text style={styles.fabIcon}>+</Text>
         <Text style={styles.fabText}>ADD PRODUCT</Text>
       </Pressable>
+
+      {/* Product Published Modal (Screen 3 in Figma) */}
+      <ProductPublishedModal
+        visible={showPublishedModal}
+        productTitle={newlyAddedTitle || undefined}
+        onViewProduct={() => {
+          setShowPublishedModal(false);
+          const found = products.find((p) => p.title === newlyAddedTitle);
+          if (found) setPerfProduct(found);
+        }}
+        onAddAnother={() => {
+          setShowPublishedModal(false);
+          onAddProduct();
+        }}
+        onClose={() => setShowPublishedModal(false)}
+      />
+
+      {/* Update Stock Modal (Screen 5 in Figma) */}
+      <UpdateStockModal
+        visible={Boolean(stockProduct)}
+        product={stockProduct}
+        onClose={() => setStockProduct(null)}
+        onSuccess={(updated) => {
+          setProducts((prev) =>
+            prev.map((p) => ((p.id || p._id) === (updated.id || updated._id) ? updated : p))
+          );
+        }}
+      />
+
+      {/* Delete or Archive Modal (Screen 6 in Figma) */}
+      <DeleteArchiveModal
+        visible={Boolean(deleteProduct)}
+        product={deleteProduct}
+        onClose={() => setDeleteProduct(null)}
+        onSuccess={() => {
+          if (deleteProduct) {
+            const delId = deleteProduct._id || deleteProduct.id;
+            setProducts((prev) => prev.filter((p) => (p.id || p._id) !== delId));
+          }
+        }}
+      />
+
+      {/* Edit Product Screen (Screen 4 in Figma) */}
+      {editingItem && (
+        <View style={StyleSheet.absoluteFill}>
+          <EditProductScreen
+            product={editingItem}
+            onBack={() => setEditingItem(null)}
+            onSaved={(updated) => {
+              setProducts((prev) =>
+                prev.map((p) => ((p.id || p._id) === (updated.id || updated._id) ? updated : p))
+              );
+              setEditingItem(null);
+            }}
+          />
+        </View>
+      )}
+
+      {/* Product Performance Analytics (Screen 7 in Figma) */}
+      {perfProduct && (
+        <View style={StyleSheet.absoluteFill}>
+          <ProductPerformanceScreen
+            product={perfProduct}
+            onBack={() => setPerfProduct(null)}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 }

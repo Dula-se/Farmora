@@ -21,6 +21,11 @@ interface FarmerDashboardScreenProps {
   onViewOrders: () => void;
   onViewMessages?: () => void;
   onOpenProfile?: () => void;
+  onOpenMarketTrends?: () => void;
+  onOpenDistrictPriceCompare?: () => void;
+  onOpenWholesaleRetail?: () => void;
+  onOpenTrustScore?: () => void;
+  onOpenRescueProduce?: () => void;
 }
 
 interface FarmerOrderSummary {
@@ -63,6 +68,11 @@ export function FarmerDashboardScreen({
   onViewOrders,
   onViewMessages,
   onOpenProfile,
+  onOpenMarketTrends,
+  onOpenDistrictPriceCompare,
+  onOpenWholesaleRetail,
+  onOpenTrustScore,
+  onOpenRescueProduce,
 }: FarmerDashboardScreenProps) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [myListings, setMyListings] = useState<ApiProduceItem[]>([]);
@@ -337,6 +347,104 @@ export function FarmerDashboardScreen({
                   </View>
                 </View>
               ))}
+            </View>
+
+            {/* Agri-Market Intelligence & Tools (Matching Figma Screens 8, 9, 10, 11, 12) */}
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>Market Intelligence & Tools</Text>
+
+              {/* Farmer Trust Score Card (Figma Screen 12) */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenTrustScore}>
+                <View style={styles.intelIconCircle}>
+                  <Text style={{ fontSize: 20 }}>🎖️</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.intelHeaderRow}>
+                    <Text style={styles.intelCardTitle}>Farmer Trust Score</Text>
+                    <View style={styles.trustBadge}>
+                      <Text style={styles.trustBadgeText}>94 / 100</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.intelCardSub}>
+                    Grade A+ Certified • Top 5% in Central Province
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* Tomato Market Trend (Figma Screen 11) */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenMarketTrends}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#FEF3C7' }]}>
+                  <Text style={{ fontSize: 20 }}>📈</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.intelHeaderRow}>
+                    <Text style={styles.intelCardTitle}>Tomato Market Trend</Text>
+                    <Text style={styles.trendUpText}>+Rs. 12/kg Today</Text>
+                  </View>
+                  <Text style={styles.intelCardSub}>
+                    Nuwara Eliya Mandi: Rs. 340/kg • Bullish rain forecast
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* District Price Compare (Figma Screen 9) */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenDistrictPriceCompare}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                  <Text style={{ fontSize: 20 }}>🏷️</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.intelHeaderRow}>
+                    <Text style={styles.intelCardTitle}>District Price Compare</Text>
+                    <Text style={styles.colomboAdvantage}>Colombo +17%</Text>
+                  </View>
+                  <Text style={styles.intelCardSub}>
+                    Compare farmgate rates across Manning, Dambulla & Kandy
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* Wholesale vs Retail Calculator (Figma Screen 10) */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenWholesaleRetail}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#F3E8FF' }]}>
+                  <Text style={{ fontSize: 20 }}>⚖️</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.intelCardTitle}>Wholesale vs Retail Strategy</Text>
+                  <Text style={styles.intelCardSub}>
+                    Optimize bulk 50kg+ clearance rates vs direct retail margins
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* Rescue Produce Banner (Figma Screen 8) */}
+              <Pressable
+                style={styles.rescueBannerCard}
+                onPress={onOpenRescueProduce}>
+                <View style={styles.rescueBannerContent}>
+                  <Text style={styles.rescueBannerEmoji}>🌱</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rescueBannerTitle}>Rescue Produce Surplus Feed</Text>
+                    <Text style={styles.rescueBannerSub}>
+                      List near-expiry or surplus crops to quick commercial buyers
+                    </Text>
+                  </View>
+                  <View style={styles.rescueOpenBtn}>
+                    <Text style={styles.rescueOpenBtnText}>Open</Text>
+                  </View>
+                </View>
+              </Pressable>
             </View>
 
             {/* SMS / Twilio Integration Status Banner */}
@@ -847,5 +955,104 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  // Intelligence Cards Styles
+  intelCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 10,
+    gap: 12,
+  },
+  intelIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DCFCE7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  intelHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  intelCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  intelCardSub: {
+    fontSize: 11,
+    color: '#64748B',
+    lineHeight: 16,
+  },
+  intelArrow: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#CBD5E1',
+    marginLeft: 4,
+  },
+  trustBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  trustBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  trendUpText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#D97706',
+  },
+  colomboAdvantage: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#2563EB',
+  },
+  rescueBannerCard: {
+    backgroundColor: '#14532D',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 4,
+  },
+  rescueBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rescueBannerEmoji: {
+    fontSize: 24,
+  },
+  rescueBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  rescueBannerSub: {
+    fontSize: 11,
+    color: '#BBF7D0',
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  rescueOpenBtn: {
+    backgroundColor: '#22C55E',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  rescueOpenBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

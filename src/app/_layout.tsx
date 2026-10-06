@@ -21,7 +21,10 @@ import { ResetPasswordScreen } from '@/screens/auth/reset-password-screen';
 import { MarketplaceFlow } from '@/screens/buyer/marketplace-flow';
 import { FarmerFlow } from '@/screens/farmer/farmer-flow';
 import { getStoredUser, ApiUser } from '@/services/api';
+import { CartProvider } from '@/context/cart-context';
 import AppTabs from '@/components/app-tabs';
+
+// App root layout with role-based routing (Farmer vs Buyer)
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -195,7 +198,9 @@ export default function TabLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      {renderContent()}
+      <CartProvider>
+        {renderContent()}
+      </CartProvider>
     </ThemeProvider>
   );
 }

@@ -13,7 +13,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { fetchProduceListings, ApiProduceItem, getStoredUser, ApiUser } from '@/services/api';
+import {
+  fetchProduceListings,
+  ApiProduceItem,
+  getStoredUser,
+  ApiUser,
+  fetchWishlist,
+  toggleWishlist,
+} from '@/services/api';
+import { useCart } from '@/context/cart-context';
 import { MARKET_CATEGORIES } from './all-categories-screen';
 import { FilterModal, FilterState } from './filter-modal';
 import { LocationPermissionModal } from './location-permission-modal';
@@ -29,6 +37,8 @@ interface BuyerHomeScreenProps {
   onOpenFarmsMap?: () => void;
   onOpenFarmerMatching?: () => void;
   onOpenProductScanner?: () => void;
+  onOpenWishlist?: () => void;
+  onOpenCart?: () => void;
 }
 
 const NEARBY_FARMERS = [
@@ -72,8 +82,14 @@ export function BuyerHomeScreen({
   onOpenFarmsMap,
   onOpenFarmerMatching,
   onOpenProductScanner,
+  onOpenWishlist,
+  onOpenCart,
 }: BuyerHomeScreenProps) {
+  const { totalCount: cartCount, addToCart } = useCart();
   const [produceList, setProduceList] = useState<ApiProduceItem[]>([]);
+  const [wishlistedIds, setWishlistedIds] = useState<Set<string>>(new Set());
+  const [recentlyAddedId, setRecentlyAddedId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
@@ -83,14 +99,24 @@ export function BuyerHomeScreen({
 
   const loadData = useCallback(async () => {
     try {
-      const [items, currentUser] = await Promise.all([
+      const [items, currentUser, savedWishlist] = await Promise.all([
         fetchProduceListings(),
         getStoredUser(),
+        fetchWishlist().catch(() => []),
       ]);
       setProduceList(items);
       setUser(currentUser);
       if (currentUser?.district) {
         setSelectedLocation(`${currentUser.district}, Sri Lanka`);
+      }
+      if (Array.isArray(savedWishlist) && savedWishlist.length > 0) {
+        const ids = new Set<string>();
+        savedWishlist.forEach((w: any) => {
+          if (w.produceId) ids.add(w.produceId);
+          else if (w.id) ids.add(w.id);
+          else if (w._id) ids.add(w._id);
+        });
+        setWishlistedIds(ids);
       }
     } catch (err) {
       console.error('[BuyerHomeScreen] Failed to load data from MongoDB:', err);
@@ -109,13 +135,63 @@ export function BuyerHomeScreen({
     loadData();
   };
 
+  const handleToggleWishlist = async (item: ApiProduceItem) => {
+    const pId = item.id || (item as any)._id;
+    const isCurrentlyWishlisted = wishlistedIds.has(pId);
+    setWishlistedIds((prev) => {
+      const next = new Set(prev);
+      if (isCurrentlyWishlisted) {
+        next.delete(pId);
+      } else {
+        next.add(pId);
+      }
+      return next;
+    });
+
+    setToastMessage(
+      isCurrentlyWishlisted
+        ? `Removed "${item.title}" from Wishlist`
+        : `Saved "${item.title}" to Wishlist ❤️`
+    );
+    setTimeout(() => setToastMessage(null), 2200);
+
+    try {
+      await toggleWishlist(pId);
+    } catch (err) {
+      console.warn('[BuyerHomeScreen] Wishlist toggle API error:', err);
+    }
+  };
+
+  const handleAddToCart = (item: ApiProduceItem) => {
+    const pId = item.id || (item as any)._id;
+    addToCart({
+      id: pId,
+      title: item.title,
+      pricePerUnit: item.pricePerUnit,
+      unit: item.unit,
+      farmerName: item.farmerName,
+      locationDistrict: item.locationDistrict,
+      locationCity: item.locationCity,
+      image: item.images?.[0] || '',
+      quantity: 1,
+      maxQuantity: item.availableQuantity,
+      category: item.category,
+      isOrganic: item.isOrganic,
+    });
+
+    setRecentlyAddedId(pId);
+    setToastMessage(`Added 1 ${item.unit} "${item.title}" to Cart 🛒`);
+    setTimeout(() => setRecentlyAddedId(null), 1400);
+    setTimeout(() => setToastMessage(null), 2200);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       {/* Header (Screen 1 & 2 in Figma) */}
       <View style={styles.header}>
-        {/* Top bar with logo and notifications */}
+        {/* Top bar with logo, wishlist, cart and notifications */}
         <View style={styles.topBar}>
           <View style={styles.brandRow}>
             <View style={styles.logoBadge}>
@@ -125,8 +201,61 @@ export function BuyerHomeScreen({
           </View>
 
           <View style={styles.topRightActions}>
-            <Pressable style={styles.notificationBtn} hitSlop={10}>
-              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            {/* Wishlist Icon Button */}
+            <Pressable
+              style={styles.headerActionBtn}
+              hitSlop={10}
+              onPress={onOpenWishlist}>
+              <Svg
+                width={21}
+                height={21}
+                viewBox="0 0 24 24"
+                fill={wishlistedIds.size > 0 ? '#EF4444' : 'none'}
+                stroke={wishlistedIds.size > 0 ? '#EF4444' : '#1E293B'}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </Svg>
+              {wishlistedIds.size > 0 && (
+                <View style={styles.badgeRed}>
+                  <Text style={styles.badgeText}>
+                    {wishlistedIds.size > 9 ? '9+' : wishlistedIds.size}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+
+            {/* Cart Icon Button */}
+            <Pressable
+              style={styles.headerActionBtn}
+              hitSlop={10}
+              onPress={onOpenCart}>
+              <Svg
+                width={21}
+                height={21}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#1E293B"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round">
+                <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <Path d="M3 6h18" />
+                <Path d="M16 10a4 4 0 0 1-8 0" />
+              </Svg>
+              {cartCount > 0 && (
+                <View style={styles.badgeGreen}>
+                  <Text style={styles.badgeText}>
+                    {cartCount > 9 ? '9+' : cartCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+
+            {/* Notification Bell */}
+            <Pressable style={styles.headerActionBtn} hitSlop={10}>
+              <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </Svg>
@@ -277,58 +406,103 @@ export function BuyerHomeScreen({
             </View>
           ) : (
             <View style={styles.productsGrid}>
-              {produceList.map((item) => (
-                <Pressable
-                  key={item.id || item._id}
-                  style={({ pressed }) => [
-                    styles.productCard,
-                    pressed && styles.cardPressed,
-                  ]}
-                  onPress={() => onSelectProduct(item)}>
-                  {item.images && item.images[0] ? (
-                    <Image
-                      source={{ uri: item.images[0] }}
-                      style={styles.productImage}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View style={[styles.productImage, styles.placeholderImg]}>
-                      <Text style={{ fontSize: 32 }}>🌱</Text>
-                    </View>
-                  )}
+              {produceList.map((item) => {
+                const itemId = item.id || (item as any)._id;
+                const isItemWishlisted = wishlistedIds.has(itemId);
+                const isJustAdded = recentlyAddedId === itemId;
 
-                  {item.isOrganic && (
-                    <View style={styles.organicTag}>
-                      <Text style={styles.organicTagText}>Organic</Text>
-                    </View>
-                  )}
+                return (
+                  <Pressable
+                    key={itemId}
+                    style={({ pressed }) => [
+                      styles.productCard,
+                      pressed && styles.cardPressed,
+                    ]}
+                    onPress={() => onSelectProduct(item)}>
+                    <View style={styles.productImageContainer}>
+                      {item.images && item.images[0] ? (
+                        <Image
+                          source={{ uri: item.images[0] }}
+                          style={styles.productImage}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={[styles.productImage, styles.placeholderImg]}>
+                          <Text style={{ fontSize: 32 }}>🌱</Text>
+                        </View>
+                      )}
 
-                  <View style={styles.productInfo}>
-                    <Text style={styles.productTitle} numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.farmerSub} numberOfLines={1}>
-                      🧑‍🌾 {item.farmerName} • 📍 {item.locationDistrict}
-                    </Text>
-
-                    <View style={styles.productBottom}>
-                      <Text style={styles.productPrice}>
-                        Rs. {item.pricePerUnit}
-                        <Text style={styles.productUnit}> /{item.unit}</Text>
-                      </Text>
-
+                      {/* Wishlist Heart Button overlay */}
                       <Pressable
-                        style={styles.addBtn}
+                        style={[
+                          styles.cardWishlistBtn,
+                          isItemWishlisted && styles.cardWishlistBtnActive,
+                        ]}
+                        hitSlop={10}
                         onPress={(e) => {
                           e.stopPropagation();
-                          onSelectProduct(item);
+                          handleToggleWishlist(item);
                         }}>
-                        <Text style={styles.addBtnText}>+ Add</Text>
+                        <Svg
+                          width={16}
+                          height={16}
+                          viewBox="0 0 24 24"
+                          fill={isItemWishlisted ? '#EF4444' : 'none'}
+                          stroke={isItemWishlisted ? '#EF4444' : '#1E293B'}
+                          strokeWidth={2.4}
+                          strokeLinecap="round"
+                          strokeLinejoin="round">
+                          <Path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                        </Svg>
                       </Pressable>
+
+                      {item.isOrganic && (
+                        <View style={styles.organicTag}>
+                          <Text style={styles.organicTagText}>Organic</Text>
+                        </View>
+                      )}
                     </View>
-                  </View>
-                </Pressable>
-              ))}
+
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.farmerSub} numberOfLines={1}>
+                        🧑‍🌾 {item.farmerName} • 📍 {item.locationDistrict}
+                      </Text>
+
+                      <View style={styles.productBottom}>
+                        <Text style={styles.productPrice}>
+                          Rs. {item.pricePerUnit}
+                          <Text style={styles.productUnit}> /{item.unit}</Text>
+                        </Text>
+
+                        {/* Interactive Add to Cart button */}
+                        <Pressable
+                          style={[
+                            styles.addBtn,
+                            isJustAdded && styles.addBtnSuccess,
+                          ]}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleAddToCart(item);
+                          }}>
+                          {isJustAdded ? (
+                            <Text style={styles.addBtnTextSuccess}>✓ Added</Text>
+                          ) : (
+                            <View style={styles.addBtnRow}>
+                              <Svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round">
+                                <Path d="M12 5v14M5 12h14" />
+                              </Svg>
+                              <Text style={styles.addBtnText}>Cart</Text>
+                            </View>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           )}
         </View>
@@ -405,6 +579,13 @@ export function BuyerHomeScreen({
         }}
         onClose={() => setShowLocationModal(false)}
       />
+
+      {/* Floating Action Feedback Toast */}
+      {toastMessage && (
+        <View style={styles.toastBanner} pointerEvents="none">
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -453,6 +634,51 @@ const styles = StyleSheet.create({
   topRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+  },
+  headerActionBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  badgeRed: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: '#EF4444',
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  badgeGreen: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    backgroundColor: '#2E7D32',
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  badgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   notificationBtn: {
     width: 38,
@@ -745,16 +971,78 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#64748B',
   },
+  productImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: 125,
+    backgroundColor: '#F1F5F9',
+  },
+  cardWishlistBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
+    elevation: 3,
+    zIndex: 3,
+  },
+  cardWishlistBtnActive: {
+    backgroundColor: '#FFFFFF',
+  },
   addBtn: {
     backgroundColor: '#EBF5EE',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
     borderRadius: 8,
+    minHeight: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addBtnSuccess: {
+    backgroundColor: '#DCFCE7',
+  },
+  addBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   addBtnText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#386641',
+    color: '#2E7D32',
+  },
+  addBtnTextSuccess: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  toastBanner: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 36 : 24,
+    alignSelf: 'center',
+    backgroundColor: '#1E293B',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 99,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   farmersScroll: {
     paddingHorizontal: 20,

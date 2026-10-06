@@ -238,6 +238,149 @@ export async function fetchMyListings(): Promise<ApiProduceItem[]> {
   return result.data || [];
 }
 
+export async function updateProduceListing(
+  id: string,
+  data: Partial<ApiProduceItem>
+): Promise<ApiProduceItem> {
+  const result = await apiFetch<ApiProduceItem>(`/produce/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+  return result.data;
+}
+
+export async function deleteProduceListing(id: string): Promise<void> {
+  await apiFetch(`/produce/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function updateProduceStock(
+  id: string,
+  quantity: number,
+  notifyBuyers: boolean = false
+): Promise<{ produce: ApiProduceItem; notifiedBuyers: boolean }> {
+  const result = await apiFetch<{ produce: ApiProduceItem; notifiedBuyers: boolean }>(
+    `/produce/${id}/stock`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ quantity, notifyBuyers }),
+    }
+  );
+  return result.data;
+}
+
+export async function archiveProduce(
+  id: string,
+  archive: boolean = true
+): Promise<ApiProduceItem> {
+  const result = await apiFetch<ApiProduceItem>(`/produce/${id}/archive`, {
+    method: 'PATCH',
+    body: JSON.stringify({ archive }),
+  });
+  return result.data;
+}
+
+export async function fetchProducePerformance(id: string): Promise<any> {
+  const result = await apiFetch<any>(`/produce/${id}/performance`);
+  return result.data;
+}
+
+// ─── Real Rescue Produce API ──────────────────────────────────────────────────
+export async function fetchRescueProduce(reason?: string): Promise<any[]> {
+  const endpoint = reason && reason !== 'all' ? `/produce/rescue?reason=${reason}` : '/produce/rescue';
+  const result = await apiFetch<any[]>(endpoint);
+  return result.data || [];
+}
+
+export async function createRescueProduce(data: any): Promise<any> {
+  const result = await apiFetch<any>('/produce/rescue', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+  return result.data;
+}
+
+// ─── Real Wishlist API ────────────────────────────────────────────────────────
+export async function fetchWishlist(): Promise<any[]> {
+  const result = await apiFetch<any[]>('/wishlist');
+  return result.data || [];
+}
+
+export async function toggleWishlist(produceId: string): Promise<{ isWishlisted: boolean }> {
+  const result = await apiFetch<{ isWishlisted: boolean }>('/wishlist/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ produceId }),
+  });
+  return result.data;
+}
+
+export async function checkWishlistStatus(produceId: string): Promise<{ isWishlisted: boolean }> {
+  const result = await apiFetch<{ isWishlisted: boolean }>(`/wishlist/check/${produceId}`);
+  return result.data;
+}
+
+// ─── Real Search & Search History API ─────────────────────────────────────────
+export async function fetchSearchHistory(): Promise<any[]> {
+  const result = await apiFetch<any[]>('/search/history');
+  return result.data || [];
+}
+
+export async function saveSearchHistory(
+  query: string,
+  category?: string,
+  district?: string,
+  resultCount?: number
+): Promise<any> {
+  const result = await apiFetch<any>('/search/record', {
+    method: 'POST',
+    body: JSON.stringify({ query, category, district, resultCount }),
+  });
+  return result.data;
+}
+
+export async function clearSearchHistory(id?: string): Promise<void> {
+  const endpoint = id ? `/search/history?id=${id}` : '/search/history';
+  await apiFetch(endpoint, {
+    method: 'DELETE',
+  });
+}
+
+export async function fetchPopularSearches(): Promise<any[]> {
+  const result = await apiFetch<any[]>('/search/popular');
+  return result.data || [];
+}
+
+// ─── Real Market Intelligence & Trust Score API ──────────────────────────────
+export async function fetchDistrictPriceCompare(crop?: string, district?: string): Promise<any> {
+  const query = new URLSearchParams();
+  if (crop) query.append('crop', crop);
+  if (district) query.append('district', district);
+  const result = await apiFetch<any>(`/market/compare?${query.toString()}`);
+  return result.data;
+}
+
+export async function fetchWholesaleVsRetail(crop?: string): Promise<any> {
+  const query = new URLSearchParams();
+  if (crop) query.append('crop', crop);
+  const result = await apiFetch<any>(`/market/pricing-strategy?${query.toString()}`);
+  return result.data;
+}
+
+export async function fetchMarketTrends(crop?: string, district?: string): Promise<any> {
+  const query = new URLSearchParams();
+  if (crop) query.append('crop', crop);
+  if (district) query.append('district', district);
+  const result = await apiFetch<any>(`/market/trends?${query.toString()}`);
+  return result.data;
+}
+
+export async function fetchFarmerTrustScore(farmerId?: string): Promise<any> {
+  const endpoint = farmerId ? `/market/trust-score/${farmerId}` : '/market/trust-score';
+  const result = await apiFetch<any>(endpoint);
+  return result.data;
+}
+
 // ─── Real Image Upload API ───────────────────────────────────────────────────
 export async function uploadImage(
   imageUri: string,
@@ -264,3 +407,4 @@ export async function uploadImage(
 
   return result.data;
 }
+

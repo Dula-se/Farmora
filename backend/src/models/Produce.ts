@@ -22,6 +22,19 @@ export interface IProduceListing extends Document {
   images: string[];
   isOrganic: boolean;
   isFeatured: boolean;
+  farmingMethod?: 'organic' | 'conventional' | 'greenhouse';
+  grade?: string;
+  wholesaleTiers?: Array<{ minQty: number; price: number }>;
+  packagingType?: string;
+  shelfLifeDays?: number;
+  isRescue?: boolean;
+  rescueDiscount?: number;
+  rescueReason?: 'near_expiry' | 'surplus' | 'cosmetic_blemish' | 'none';
+  rescueExpiryHours?: number;
+  viewsCount?: number;
+  ordersCount?: number;
+  totalKgSold?: number;
+  revenueGenerated?: number;
   status: 'available' | 'sold_out' | 'archived';
   createdAt: Date;
   updatedAt: Date;
@@ -57,6 +70,32 @@ const produceSchema = new Schema<IProduceListing>(
     images: [{ type: String }],
     isOrganic: { type: Boolean, default: false },
     isFeatured: { type: Boolean, default: false },
+    farmingMethod: {
+      type: String,
+      enum: ['organic', 'conventional', 'greenhouse'],
+      default: 'organic',
+    },
+    grade: { type: String, default: 'Grade A+' },
+    wholesaleTiers: [
+      {
+        minQty: { type: Number, required: true },
+        price: { type: Number, required: true },
+      },
+    ],
+    packagingType: { type: String, default: 'Standard Crate' },
+    shelfLifeDays: { type: Number, default: 7 },
+    isRescue: { type: Boolean, default: false, index: true },
+    rescueDiscount: { type: Number, default: 0 },
+    rescueReason: {
+      type: String,
+      enum: ['near_expiry', 'surplus', 'cosmetic_blemish', 'none'],
+      default: 'none',
+    },
+    rescueExpiryHours: { type: Number, default: 24 },
+    viewsCount: { type: Number, default: 0 },
+    ordersCount: { type: Number, default: 0 },
+    totalKgSold: { type: Number, default: 0 },
+    revenueGenerated: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ['available', 'sold_out', 'archived'],

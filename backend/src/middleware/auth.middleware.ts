@@ -44,6 +44,23 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, config.jwt.secret) as JwtPayload;
+      const user = await UserModel.findById(decoded.userId);
+      if (user) {
+        req.user = user;
+      }
+    }
+    next();
+  } catch {
+    next();
+  }
+}
+
 export function requireRoles(...allowedRoles: AccountType[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {

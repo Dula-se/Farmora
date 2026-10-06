@@ -11,11 +11,18 @@ const router = Router();
 
 // Public Produce Browse & Search
 router.get('/', ProduceController.getAll);
+router.get('/rescue', ProduceController.getRescueProduce);
 router.get('/item/:id', ProduceController.getById);
 
 // Farmer Specific routes
 router.get(
   '/farmer/my-listings',
+  requireAuth,
+  requireRoles('farmer'),
+  ProduceController.getMyListings
+);
+router.get(
+  '/my/listings',
   requireAuth,
   requireRoles('farmer'),
   ProduceController.getMyListings
@@ -27,6 +34,32 @@ router.post(
   requireRoles('farmer'),
   validateBody(createProduceSchema),
   ProduceController.create
+);
+
+router.post(
+  '/rescue',
+  requireAuth,
+  requireRoles('farmer'),
+  ProduceController.createRescue
+);
+
+router.patch(
+  '/:id/stock',
+  requireAuth,
+  requireRoles('farmer'),
+  ProduceController.updateStock
+);
+
+router.patch(
+  '/:id/archive',
+  requireAuth,
+  requireRoles('farmer'),
+  ProduceController.archive
+);
+
+router.get(
+  '/:id/performance',
+  ProduceController.getPerformance
 );
 
 router.put(
@@ -45,3 +78,4 @@ router.delete(
 );
 
 export default router;
+

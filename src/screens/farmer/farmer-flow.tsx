@@ -15,6 +15,11 @@ import { clearAuthSession } from '@/services/api';
 import { FarmerDashboardScreen } from './farmer-dashboard-screen';
 import { MyProductsScreen } from './my-products-screen';
 import { AddProductWizard } from './add-product-wizard';
+import { MarketTrendScreen } from './market-trend-screen';
+import { DistrictPriceCompareScreen } from './district-price-compare-screen';
+import { WholesaleRetailScreen } from './wholesale-retail-screen';
+import { FarmerTrustScoreScreen } from './farmer-trust-score-screen';
+import { RescueProduceScreen } from './rescue-produce-screen';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -22,7 +27,12 @@ export type FarmerScreenView =
   | 'add-product'
   | 'orders'
   | 'messages'
-  | 'profile';
+  | 'profile'
+  | 'market-trends'
+  | 'district-price-compare'
+  | 'wholesale-retail'
+  | 'farmer-trust-score'
+  | 'rescue-produce';
 
 export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'profile';
 
@@ -47,7 +57,13 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
     setCurrentView('products');
   };
 
-  const isFullScreen = currentView === 'add-product';
+  const isFullScreen =
+    currentView === 'add-product' ||
+    currentView === 'market-trends' ||
+    currentView === 'district-price-compare' ||
+    currentView === 'wholesale-retail' ||
+    currentView === 'farmer-trust-score' ||
+    currentView === 'rescue-produce';
 
   return (
     <View style={styles.container}>
@@ -60,6 +76,11 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
             onViewOrders={() => handleTabPress('orders')}
             onViewMessages={() => handleTabPress('messages')}
             onOpenProfile={() => handleTabPress('profile')}
+            onOpenMarketTrends={() => setCurrentView('market-trends')}
+            onOpenDistrictPriceCompare={() => setCurrentView('district-price-compare')}
+            onOpenWholesaleRetail={() => setCurrentView('wholesale-retail')}
+            onOpenTrustScore={() => setCurrentView('farmer-trust-score')}
+            onOpenRescueProduce={() => setCurrentView('rescue-produce')}
           />
         )}
 
@@ -75,6 +96,26 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
             onBack={() => setCurrentView('products')}
             onSuccess={handleProductCreated}
           />
+        )}
+
+        {currentView === 'market-trends' && (
+          <MarketTrendScreen onBack={() => setCurrentView('dashboard')} />
+        )}
+
+        {currentView === 'district-price-compare' && (
+          <DistrictPriceCompareScreen onBack={() => setCurrentView('dashboard')} />
+        )}
+
+        {currentView === 'wholesale-retail' && (
+          <WholesaleRetailScreen onBack={() => setCurrentView('dashboard')} />
+        )}
+
+        {currentView === 'farmer-trust-score' && (
+          <FarmerTrustScoreScreen onBack={() => setCurrentView('dashboard')} />
+        )}
+
+        {currentView === 'rescue-produce' && (
+          <RescueProduceScreen onBack={() => setCurrentView('dashboard')} />
         )}
 
         {currentView === 'orders' && (

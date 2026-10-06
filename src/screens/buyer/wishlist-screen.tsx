@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Platform,
   Pressable,
@@ -12,7 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { ApiProduceItem } from '@/services/api';
+import { ApiProduceItem, fetchWishlist, toggleWishlist } from '@/services/api';
+import { useCart } from '@/context/cart-context';
 
 export interface WishlistItem {
   id: string;
@@ -87,24 +89,80 @@ interface WishlistScreenProps {
   onBack: () => void;
   onSelectProduct?: (produceId: string) => void;
   onAddToCart?: (item: WishlistItem) => void;
+  onViewCart?: () => void;
 }
 
 export function WishlistScreen({
   onBack,
   onSelectProduct,
   onAddToCart,
+  onViewCart,
 }: WishlistScreenProps) {
+  const { addToCart, totalCount: cartTotalCount } = useCart();
   const [items, setItems] = useState<WishlistItem[]>(DEFAULT_WISHLIST_ITEMS);
+  const [loading, setLoading] = useState(false);
   const [showAddedModal, setShowAddedModal] = useState(false);
   const [addedItemTitle, setAddedItemTitle] = useState('');
 
-  const handleRemove = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  useEffect(() => {
+    const loadWishlist = async () => {
+      setLoading(true);
+      try {
+        const liveItems = await fetchWishlist();
+        if (liveItems && liveItems.length > 0) {
+          const mapped: WishlistItem[] = liveItems.map((wi: any) => {
+            const p = wi.produce || {};
+            return {
+              id: wi.id || wi.produceId,
+              produceId: wi.produceId,
+              title: p.title || 'Fresh Crop',
+              pricePerUnit: p.pricePerUnit || 250,
+              unit: p.unit || 'kg',
+              farmerName: p.farmerName || 'Local Farmer',
+              locationCity: p.locationCity || 'Central Province',
+              image: p.images?.[0] || 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400&auto=format&fit=crop&q=80',
+              inStock: (p.availableQuantity || 0) > 0,
+              category: p.category || 'vegetables',
+              organic: Boolean(p.isOrganic),
+            };
+          });
+          setItems(mapped);
+        }
+      } catch {
+        // Keep defaults on unauthenticated preview
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadWishlist();
+  }, []);
+
+  const handleRemove = async (id: string, produceId?: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id && item.produceId !== id));
+    if (produceId || id) {
+      try {
+        await toggleWishlist(produceId || id);
+      } catch {
+        // Silent catch
+      }
+    }
   };
 
   const handleAddToCart = (item: WishlistItem) => {
     setAddedItemTitle(item.title);
     setShowAddedModal(true);
+    addToCart({
+      id: item.produceId || item.id,
+      title: item.title,
+      pricePerUnit: item.pricePerUnit,
+      unit: item.unit,
+      farmerName: item.farmerName,
+      locationCity: item.locationCity,
+      image: item.image,
+      quantity: 1,
+      isOrganic: item.organic,
+      category: item.category,
+    });
     onAddToCart?.(item);
   };
 
@@ -126,10 +184,23 @@ export function WishlistScreen({
           </Text>
         </View>
 
-        <Pressable hitSlop={12} style={styles.navBtn}>
+        {/* Cart Shortcut in Wishlist Header */}
+        <Pressable
+          hitSlop={12}
+          style={styles.navBtn}
+          onPress={onViewCart || onBack}>
           <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+            <Path d="M3 6h18" />
+            <Path d="M16 10a4 4 0 0 1-8 0" />
           </Svg>
+          {cartTotalCount > 0 && (
+            <View style={styles.headerCartBadge}>
+              <Text style={styles.headerCartBadgeText}>
+                {cartTotalCount > 9 ? '9+' : cartTotalCount}
+              </Text>
+            </View>
+          )}
         </Pressable>
       </View>
 
@@ -261,6 +332,7 @@ export function WishlistScreen({
               style={styles.modalSecondaryBtn}
               onPress={() => {
                 setShowAddedModal(false);
+                onViewCart?.();
               }}>
               <Text style={styles.modalSecondaryBtnText}>View My Cart</Text>
             </Pressable>
@@ -338,6 +410,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  headerCartBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#2E7D32',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  headerCartBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   navTitleCenter: {
     alignItems: 'center',

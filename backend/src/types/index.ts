@@ -51,9 +51,40 @@ export interface ProduceListing {
   images: string[];
   isOrganic?: boolean;
   isFeatured?: boolean;
+  farmingMethod?: 'organic' | 'conventional' | 'greenhouse';
+  grade?: string;
+  wholesaleTiers?: Array<{ minQty: number; price: number }>;
+  packagingType?: string;
+  shelfLifeDays?: number;
+  isRescue?: boolean;
+  rescueDiscount?: number;
+  rescueReason?: 'near_expiry' | 'surplus' | 'cosmetic_blemish' | 'none';
+  rescueExpiryHours?: number;
+  viewsCount?: number;
+  ordersCount?: number;
+  totalKgSold?: number;
+  revenueGenerated?: number;
   status: 'available' | 'sold_out' | 'archived';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WishlistItem {
+  id: string;
+  userId: string;
+  produceId: string;
+  produce?: ProduceListing;
+  createdAt: string;
+}
+
+export interface SearchHistoryItem {
+  id: string;
+  userId: string;
+  query: string;
+  category?: string;
+  district?: string;
+  resultCount: number;
+  createdAt: string;
 }
 
 export interface UploadedFileResponse {
