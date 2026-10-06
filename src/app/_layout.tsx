@@ -19,6 +19,8 @@ import { ForgotPasswordScreen } from '@/screens/auth/forgot-password-screen';
 import { OtpVerificationScreen } from '@/screens/auth/otp-verification-screen';
 import { ResetPasswordScreen } from '@/screens/auth/reset-password-screen';
 import { MarketplaceFlow } from '@/screens/buyer/marketplace-flow';
+import { FarmerFlow } from '@/screens/farmer/farmer-flow';
+import { getStoredUser, ApiUser } from '@/services/api';
 import AppTabs from '@/components/app-tabs';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -51,6 +53,13 @@ export default function TabLayout() {
   useEffect(() => {
     // Hide native splash screen once JavaScript bundle is mounted
     SplashScreen.hideAsync().catch(() => {});
+
+    // Restore active user session and determine role
+    getStoredUser().then((stored) => {
+      if (stored) {
+        setAccountType(stored.accountType === 'farmer' ? 'farmer' : 'buyer');
+      }
+    });
   }, []);
 
   // Handle notification tap navigation (e.g. deep-link into a screen)
@@ -112,7 +121,12 @@ export default function TabLayout() {
         return (
           <LoginScreen
             onBack={() => setCurrentStep('account-type')}
-            onLoginSuccess={() => setCurrentStep('authenticated')}
+            onLoginSuccess={(user) => {
+              if (user) {
+                setAccountType(user.accountType === 'farmer' ? 'farmer' : 'buyer');
+              }
+              setCurrentStep('authenticated');
+            }}
             onCreateAccount={() => setCurrentStep('account-type')}
             onForgotPassword={() => setCurrentStep('forgot-password')}
           />
@@ -166,6 +180,15 @@ export default function TabLayout() {
 
       case 'authenticated':
       default:
+        // STRICT ROLE ENFORCEMENT: Farmer screens accessible ONLY to farmers!
+        if (accountType === 'farmer') {
+          return (
+            <FarmerFlow
+              onBackToAuth={() => setCurrentStep('login')}
+              onSwitchToBuyerPreview={() => setAccountType('buyer')}
+            />
+          );
+        }
         return <MarketplaceFlow onBackToAuth={() => setCurrentStep('login')} />;
     }
   };
