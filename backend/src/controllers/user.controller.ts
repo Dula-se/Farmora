@@ -9,7 +9,7 @@ export const updateProfileSchema = z.object({
   email: z.string().email().optional(),
   district: z.string().optional(),
   address: z.string().optional(),
-  avatarUrl: z.string().url().optional(),
+  avatarUrl: z.string().optional(),
   pushToken: z.string().optional(),
 });
 

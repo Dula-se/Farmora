@@ -58,10 +58,12 @@ export default function TabLayout() {
     // Hide native splash screen once JavaScript bundle is mounted
     SplashScreen.hideAsync().catch(() => {});
 
-    // Restore active user session and determine role
+    // Restore active user session and strictly enforce role
     getStoredUser().then((stored) => {
       if (stored) {
-        setAccountType(stored.accountType === 'farmer' ? 'farmer' : 'buyer');
+        const isFarmer = stored.accountType === 'farmer';
+        setAccountType(isFarmer ? 'farmer' : 'buyer');
+        setCurrentStep('authenticated');
       }
     });
   }, []);
@@ -161,8 +163,14 @@ export default function TabLayout() {
       case 'registration-success':
         return (
           <RegistrationSuccessScreen
-            onCompleteProfile={() => setCurrentStep('authenticated')}
-            onSkipForNow={() => setCurrentStep('authenticated')}
+            onCompleteProfile={() => {
+              setAccountType('farmer');
+              setCurrentStep('authenticated');
+            }}
+            onSkipForNow={() => {
+              setAccountType('farmer');
+              setCurrentStep('authenticated');
+            }}
           />
         );
 
@@ -198,16 +206,21 @@ export default function TabLayout() {
 
       case 'authenticated':
       default:
-        // STRICT ROLE ENFORCEMENT: Farmer screens accessible ONLY to farmers!
+        // STRICT ROLE ENFORCEMENT:
+        // - Farmer screens are accessible ONLY to farmers.
+        // - Buyer screens are accessible ONLY to buyers.
         if (accountType === 'farmer') {
           return (
             <FarmerFlow
               onBackToAuth={() => setCurrentStep('login')}
-              onSwitchToBuyerPreview={() => setAccountType('buyer')}
             />
           );
         }
-        return <MarketplaceFlow onBackToAuth={() => setCurrentStep('login')} />;
+        return (
+          <MarketplaceFlow
+            onBackToAuth={() => setCurrentStep('login')}
+          />
+        );
     }
   };
 

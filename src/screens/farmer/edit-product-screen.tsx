@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { updateProduceListing, ApiProduceItem } from '../../services/api';
+import { promptMediaSource } from '../../services/media-picker';
 
 interface EditProductScreenProps {
   product: ApiProduceItem;
@@ -131,10 +132,17 @@ export const EditProductScreen: React.FC<EditProductScreenProps> = ({
             <TouchableOpacity
               style={styles.addPhotoBox}
               onPress={() => {
-                setImages((prev) => [
-                  ...prev,
-                  'https://images.unsplash.com/photo-1567306226416-28f0efdc88ce?w=400&auto=format&fit=crop&q=80',
-                ]);
+                if (images.length >= 5) {
+                  Alert.alert('Limit Reached', 'You can upload up to 5 photos per listing.');
+                  return;
+                }
+                promptMediaSource({
+                  title: 'Add Product Photo',
+                  message: 'Take a photo or choose from gallery:',
+                  onSelected: (res) => {
+                    setImages((prev) => [...prev, res.dataUrl]);
+                  },
+                });
               }}>
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <Path d="M12 5v14M5 12h14" />

@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { registerWithApi, googleAuthApi } from '@/services/api';
 import { GoogleAuthModal } from '@/services/google-auth-modal';
+import { promptMediaSource } from '@/services/media-picker';
 
 interface BuyerRegisterScreenProps {
   onBackToLogin: () => void;
@@ -85,6 +86,8 @@ export function BuyerRegisterScreen({
   ]);
 
   const [loading, setLoading] = useState(false);
+  const [brDocUri, setBrDocUri] = useState<string | null>(null);
+  const [brDocName, setBrDocName] = useState<string | null>(null);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [createdUser, setCreatedUser] = useState<any>(null);
 
@@ -147,6 +150,7 @@ export function BuyerRegisterScreen({
           contactPerson: contactPerson.trim() || fullName.trim(),
           monthlyPurchasingVolume: monthlyVolume,
           preferredCategories,
+          registrationDoc: brDocUri || undefined,
         };
       }
 
@@ -512,6 +516,38 @@ export function BuyerRegisterScreen({
                       onChangeText={setBusinessRegNo}
                     />
                   </View>
+                </View>
+
+                {/* Business Registration / VAT Document (Optional) */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>BR / VAT Document (Optional)</Text>
+                  <Pressable
+                    style={{
+                      borderWidth: 1.5,
+                      borderStyle: 'dashed',
+                      borderColor: brDocUri ? '#1E5E3A' : '#CBD5E1',
+                      borderRadius: 12,
+                      padding: 14,
+                      alignItems: 'center',
+                      backgroundColor: brDocUri ? '#F0FDF4' : '#F8FAFC',
+                    }}
+                    onPress={() => {
+                      promptMediaSource({
+                        title: 'Attach Business Document',
+                        message: 'Take a photo or attach PDF of your registration document:',
+                        includeDocument: true,
+                        onSelected: (res) => {
+                          setBrDocUri(res.dataUrl);
+                          setBrDocName(res.name);
+                        },
+                      });
+                    }}>
+                    <Text style={{ fontSize: 20 }}>{brDocUri ? '✓' : '📄'}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: brDocUri ? '#1E5E3A' : '#475569', marginTop: 4 }}>
+                      {brDocUri ? brDocName || 'Document Attached (Base64)' : 'Tap to attach document or photo'}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>PDF, JPG, PNG • Max 10MB</Text>
+                  </Pressable>
                 </View>
 
                 {/* Contact Person */}

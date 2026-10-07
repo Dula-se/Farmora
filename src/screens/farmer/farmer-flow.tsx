@@ -46,10 +46,9 @@ export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'prof
 
 interface FarmerFlowProps {
   onBackToAuth: () => void;
-  onSwitchToBuyerPreview?: () => void;
 }
 
-export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowProps) {
+export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
   const [currentView, setCurrentView] = useState<FarmerScreenView>('dashboard');
   const [activeTab, setActiveTab] = useState<FarmerTab>('dashboard');
   const [newlyAddedTitle, setNewlyAddedTitle] = useState<string | null>(null);
@@ -268,16 +267,6 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
                   <Text style={styles.menuArrow}>›</Text>
                 </Pressable>
               </View>
-
-              {/* Switch to Buyer Preview mode if developer/testing */}
-              {onSwitchToBuyerPreview && (
-                <Pressable
-                  style={styles.switchModeCard}
-                  onPress={onSwitchToBuyerPreview}>
-                  <Text style={styles.switchModeTitle}>Switch to Buyer Marketplace View</Text>
-                  <Text style={styles.switchModeSub}>Preview the app from a buyer perspective</Text>
-                </Pressable>
-              )}
 
               <Pressable
                 style={styles.logoutBtn}

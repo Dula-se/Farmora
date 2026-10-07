@@ -15,7 +15,7 @@ export const createProduceSchema = z.object({
   harvestDate: z.string().optional(),
   locationDistrict: z.string().min(2, 'District is required'),
   locationCity: z.string().min(2, 'City is required'),
-  images: z.array(z.string().url('Image must be a valid URL')).min(1, 'At least one image is required'),
+  images: z.array(z.string().min(1, 'Image cannot be empty')).min(1, 'At least one image is required'),
   isOrganic: z.boolean().optional().default(false),
 });
 
@@ -30,7 +30,7 @@ export const updateProduceSchema = z.object({
   harvestDate: z.string().optional(),
   locationDistrict: z.string().optional(),
   locationCity: z.string().optional(),
-  images: z.array(z.string().url()).optional(),
+  images: z.array(z.string().min(1)).optional(),
   isOrganic: z.boolean().optional(),
   status: z.enum(['available', 'sold_out', 'archived']).optional(),
 });

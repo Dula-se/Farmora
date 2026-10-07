@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { createProduceListing, ApiProduceItem, getStoredUser } from '@/services/api';
+import { promptMediaSource } from '@/services/media-picker';
 
 interface AddProductWizardProps {
   onBack: () => void;
@@ -161,11 +162,19 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
     }
   };
 
-  const addSampleImage = () => {
-    setImages((prev) => [
-      ...prev,
-      'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?w=800&auto=format&fit=crop&q=80',
-    ]);
+  const handleAddPhoto = () => {
+    if (images.length >= 5) {
+      Alert.alert('Limit Reached', 'You can upload up to 5 photos per listing.');
+      return;
+    }
+    promptMediaSource({
+      title: 'Add Produce Photo',
+      message: 'Take a photo of your fresh produce or select from your gallery:',
+      onSelected: (result) => {
+        setImages((prev) => [...prev, result.dataUrl]);
+        setErrors((prev) => ({ ...prev, images: '' }));
+      },
+    });
   };
 
   const removeImage = (index: number) => {
@@ -324,7 +333,7 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
                 ))}
 
                 {images.length < 5 && (
-                  <Pressable style={styles.uploadBox} onPress={addSampleImage}>
+                  <Pressable style={styles.uploadBox} onPress={handleAddPhoto}>
                     <Text style={styles.uploadCameraEmoji}>📸</Text>
                     <Text style={styles.uploadText}>+ Add Photo</Text>
                   </Pressable>

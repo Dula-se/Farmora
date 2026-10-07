@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { updateFarmerOnboardingApi } from '@/services/api';
+import { promptMediaSource } from '@/services/media-picker';
 
 interface FarmerProfileWizardProps {
   initialStep?: 1 | 2 | 3 | 4 | 5 | 6 | 'checklist';
@@ -588,7 +589,15 @@ export function FarmerProfileWizard({
                 <Text style={styles.inputLabel}>Cover Photo</Text>
                 <Pressable
                   style={styles.coverUploadBox}
-                  onPress={() => Alert.alert('Cover Photo', 'Selected high-resolution farm photo')}>
+                  onPress={() => {
+                    promptMediaSource({
+                      title: 'Farm Cover Photo',
+                      message: 'Take a photo or choose from your gallery:',
+                      allowsEditing: true,
+                      aspect: [16, 9],
+                      onSelected: (res) => setCoverPhoto(res.dataUrl),
+                    });
+                  }}>
                   <Image source={{ uri: coverPhoto }} style={styles.coverPreviewImage} />
                   <View style={styles.coverUploadBadge}>
                     <Text style={styles.coverUploadBadgeText}>📷 Change Cover</Text>
@@ -600,19 +609,27 @@ export function FarmerProfileWizard({
                   {gallery.map((uri, idx) => (
                     <View key={idx} style={styles.galleryItem}>
                       <Image source={{ uri }} style={styles.galleryImage} />
+                      <Pressable
+                        style={{ position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' }}
+                        onPress={() => setGallery(gallery.filter((_, i) => i !== idx))}>
+                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>✕</Text>
+                      </Pressable>
                     </View>
                   ))}
-                  <Pressable
-                    style={styles.galleryAddBox}
-                    onPress={() => {
-                      setGallery([
-                        ...gallery,
-                        'https://images.unsplash.com/photo-1590779033100-9f60a05a013d?w=500',
-                      ]);
-                    }}>
-                    <Text style={styles.galleryAddPlus}>+</Text>
-                    <Text style={styles.galleryAddText}>Add Photo</Text>
-                  </Pressable>
+                  {gallery.length < 6 && (
+                    <Pressable
+                      style={styles.galleryAddBox}
+                      onPress={() => {
+                        promptMediaSource({
+                          title: 'Add Farm Gallery Photo',
+                          message: 'Capture a farm photo or select from gallery:',
+                          onSelected: (res) => setGallery([...gallery, res.dataUrl]),
+                        });
+                      }}>
+                      <Text style={styles.galleryAddPlus}>+</Text>
+                      <Text style={styles.galleryAddText}>Add Photo</Text>
+                    </Pressable>
+                  )}
                 </View>
 
                 <Pressable

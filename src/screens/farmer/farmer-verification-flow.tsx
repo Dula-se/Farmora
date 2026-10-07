@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Alert,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -13,6 +14,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
+import {
+  capturePhotoFromCamera,
+  pickImageFromGallery,
+  pickDocumentAsBase64,
+  promptMediaSource,
+} from '@/services/media-picker';
 
 export type VerificationStep =
   | 'landing'
@@ -38,25 +45,90 @@ export function FarmerVerificationFlow({
 }: FarmerVerificationFlowProps) {
   const [step, setStep] = useState<VerificationStep>(initialStep);
 
-  // Form states
-  const [nicFrontUploaded, setNicFrontUploaded] = useState(true);
-  const [nicBackUploaded, setNicBackUploaded] = useState(true);
+  // Base64 Form & Document states
+  const [nicFrontUri, setNicFrontUri] = useState<string | null>(null);
+  const [nicBackUri, setNicBackUri] = useState<string | null>(null);
 
   const [certType, setCertType] = useState('Organic Certification');
   const [certNumber, setCertNumber] = useState('ORG-2024-9051');
   const [issuingAuthority, setIssuingAuthority] = useState('Department of Agriculture');
   const [issueDate, setIssueDate] = useState('2023-04-12');
   const [expiryDate, setExpiryDate] = useState('2027-04-12');
-  const [certDocUploaded, setCertDocUploaded] = useState(true);
+  const [certDocUri, setCertDocUri] = useState<string | null>(null);
+  const [certDocName, setCertDocName] = useState<string | null>(null);
   const [showCertDropdown, setShowCertDropdown] = useState(false);
 
   const [ownershipDocType, setOwnershipDocType] = useState<
     'deed' | 'br' | 'grama'
   >('deed');
-  const [deedDocUploaded, setDeedDocUploaded] = useState(true);
+  const [deedDocUri, setDeedDocUri] = useState<string | null>(null);
+  const [deedDocName, setDeedDocName] = useState<string | null>(null);
   const [additionalNotes, setAdditionalNotes] = useState('');
 
   const [declarationChecked, setDeclarationChecked] = useState(true);
+
+  // Derived flags for backward compatibility
+  const nicFrontUploaded = !!nicFrontUri;
+  const nicBackUploaded = !!nicBackUri;
+  const certDocUploaded = !!certDocUri;
+  const deedDocUploaded = !!deedDocUri;
+
+  // Real Base64 upload handlers
+  const handleUploadNicFront = async (source?: 'camera' | 'gallery') => {
+    if (source === 'camera') {
+      const res = await capturePhotoFromCamera({ allowsEditing: true });
+      if (res) setNicFrontUri(res.dataUrl);
+    } else if (source === 'gallery') {
+      const res = await pickImageFromGallery({ allowsEditing: true });
+      if (res) setNicFrontUri(res.dataUrl);
+    } else {
+      promptMediaSource({
+        title: 'Upload NIC Front',
+        message: 'Take a photo with your camera or select from your gallery:',
+        onSelected: (res) => setNicFrontUri(res.dataUrl),
+      });
+    }
+  };
+
+  const handleUploadNicBack = async (source?: 'camera' | 'gallery') => {
+    if (source === 'camera') {
+      const res = await capturePhotoFromCamera({ allowsEditing: true });
+      if (res) setNicBackUri(res.dataUrl);
+    } else if (source === 'gallery') {
+      const res = await pickImageFromGallery({ allowsEditing: true });
+      if (res) setNicBackUri(res.dataUrl);
+    } else {
+      promptMediaSource({
+        title: 'Upload NIC Back',
+        message: 'Take a photo with your camera or select from your gallery:',
+        onSelected: (res) => setNicBackUri(res.dataUrl),
+      });
+    }
+  };
+
+  const handleUploadCertDoc = async () => {
+    promptMediaSource({
+      title: 'Upload Certification Document',
+      message: 'Take a photo, choose from gallery, or select PDF/Document:',
+      includeDocument: true,
+      onSelected: (res) => {
+        setCertDocUri(res.dataUrl);
+        setCertDocName(res.name);
+      },
+    });
+  };
+
+  const handleUploadDeedDoc = async () => {
+    promptMediaSource({
+      title: 'Upload Ownership Evidence',
+      message: 'Take a photo, choose from gallery, or select PDF/Document:',
+      includeDocument: true,
+      onSelected: (res) => {
+        setDeedDocUri(res.dataUrl);
+        setDeedDocName(res.name);
+      },
+    });
+  };
 
   // Helper navigate back based on step
   const handleBack = () => {
@@ -308,35 +380,35 @@ export function FarmerVerificationFlow({
             <View style={styles.uploadSection}>
               <Text style={styles.uploadLabel}>NIC Front</Text>
               <Pressable
-                style={styles.uploadDashedBox}
-                onPress={() => {
-                  setNicFrontUploaded(true);
-                  Alert.alert('NIC Front', 'Front photo of NIC selected.');
-                }}>
-                <View style={styles.uploadCameraIconCircle}>
-                  <Text style={{ fontSize: 20 }}>📷</Text>
-                </View>
-                <Text style={styles.uploadTapText}>
-                  {nicFrontUploaded ? '✓ Front photo selected' : 'Tap to upload front photo'}
-                </Text>
-                <Text style={styles.uploadFormatText}>JPG, PNG • Max 5MB</Text>
+                style={[styles.uploadDashedBox, nicFrontUri ? { padding: 4, borderColor: '#1E5E3A' } : null]}
+                onPress={() => handleUploadNicFront()}>
+                {nicFrontUri ? (
+                  <View style={{ width: '100%', height: 160, borderRadius: 12, overflow: 'hidden', position: 'relative' }}>
+                    <Image source={{ uri: nicFrontUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    <View style={{ position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(22, 101, 52, 0.92)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>✓ Front Captured (Base64)</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.uploadCameraIconCircle}>
+                      <Text style={{ fontSize: 20 }}>📷</Text>
+                    </View>
+                    <Text style={styles.uploadTapText}>Tap to capture / upload front photo</Text>
+                    <Text style={styles.uploadFormatText}>JPG, PNG • Camera or Gallery</Text>
+                  </>
+                )}
               </Pressable>
 
               <View style={styles.cameraGalleryRow}>
                 <Pressable
                   style={styles.secondaryOptionBtn}
-                  onPress={() => {
-                    setNicFrontUploaded(true);
-                    Alert.alert('Camera', 'Photo captured with camera.');
-                  }}>
+                  onPress={() => handleUploadNicFront('camera')}>
                   <Text style={styles.secondaryOptionText}>📷 Camera</Text>
                 </Pressable>
                 <Pressable
                   style={styles.secondaryOptionBtn}
-                  onPress={() => {
-                    setNicFrontUploaded(true);
-                    Alert.alert('Gallery', 'Photo chosen from gallery.');
-                  }}>
+                  onPress={() => handleUploadNicFront('gallery')}>
                   <Text style={styles.secondaryOptionText}>🖼 Gallery</Text>
                 </Pressable>
               </View>
@@ -346,35 +418,35 @@ export function FarmerVerificationFlow({
             <View style={styles.uploadSection}>
               <Text style={styles.uploadLabel}>NIC Back</Text>
               <Pressable
-                style={styles.uploadDashedBox}
-                onPress={() => {
-                  setNicBackUploaded(true);
-                  Alert.alert('NIC Back', 'Back photo of NIC selected.');
-                }}>
-                <View style={styles.uploadCameraIconCircle}>
-                  <Text style={{ fontSize: 20 }}>📷</Text>
-                </View>
-                <Text style={styles.uploadTapText}>
-                  {nicBackUploaded ? '✓ Back photo selected' : 'Tap to upload back photo'}
-                </Text>
-                <Text style={styles.uploadFormatText}>JPG, PNG • Max 5MB</Text>
+                style={[styles.uploadDashedBox, nicBackUri ? { padding: 4, borderColor: '#1E5E3A' } : null]}
+                onPress={() => handleUploadNicBack()}>
+                {nicBackUri ? (
+                  <View style={{ width: '100%', height: 160, borderRadius: 12, overflow: 'hidden', position: 'relative' }}>
+                    <Image source={{ uri: nicBackUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    <View style={{ position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(22, 101, 52, 0.92)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>✓ Back Captured (Base64)</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.uploadCameraIconCircle}>
+                      <Text style={{ fontSize: 20 }}>📷</Text>
+                    </View>
+                    <Text style={styles.uploadTapText}>Tap to capture / upload back photo</Text>
+                    <Text style={styles.uploadFormatText}>JPG, PNG • Camera or Gallery</Text>
+                  </>
+                )}
               </Pressable>
 
               <View style={styles.cameraGalleryRow}>
                 <Pressable
                   style={styles.secondaryOptionBtn}
-                  onPress={() => {
-                    setNicBackUploaded(true);
-                    Alert.alert('Camera', 'Photo captured with camera.');
-                  }}>
+                  onPress={() => handleUploadNicBack('camera')}>
                   <Text style={styles.secondaryOptionText}>📷 Camera</Text>
                 </Pressable>
                 <Pressable
                   style={styles.secondaryOptionBtn}
-                  onPress={() => {
-                    setNicBackUploaded(true);
-                    Alert.alert('Gallery', 'Photo chosen from gallery.');
-                  }}>
+                  onPress={() => handleUploadNicBack('gallery')}>
                   <Text style={styles.secondaryOptionText}>🖼 Gallery</Text>
                 </Pressable>
               </View>
@@ -395,8 +467,8 @@ export function FarmerVerificationFlow({
             <Pressable
               style={styles.retakeLink}
               onPress={() => {
-                setNicFrontUploaded(false);
-                setNicBackUploaded(false);
+                setNicFrontUri(null);
+                setNicBackUri(null);
                 Alert.alert('Reset', 'You can now select new photos.');
               }}>
               <Text style={styles.retakeLinkText}>Retake Photos</Text>
@@ -520,18 +592,27 @@ export function FarmerVerificationFlow({
             <View style={styles.uploadSection}>
               <Text style={styles.uploadLabel}>Upload Certificate Document</Text>
               <Pressable
-                style={styles.uploadDashedBox}
-                onPress={() => {
-                  setCertDocUploaded(true);
-                  Alert.alert('Upload Document', 'Certificate document attached.');
-                }}>
-                <View style={styles.uploadDocIconCircle}>
-                  <Text style={{ fontSize: 20 }}>📄</Text>
-                </View>
-                <Text style={styles.uploadTapText}>
-                  {certDocUploaded ? '✓ Certificate document attached' : 'Tap to upload document'}
-                </Text>
-                <Text style={styles.uploadFormatText}>PDF, JPG or PNG • Max 10MB</Text>
+                style={[styles.uploadDashedBox, certDocUri ? { borderColor: '#1E5E3A', padding: 8 } : null]}
+                onPress={handleUploadCertDoc}>
+                {certDocUri ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                    <Text style={{ fontSize: 28 }}>📄</Text>
+                    <Text style={{ color: '#166534', fontWeight: '700', fontSize: 13, marginTop: 6 }} numberOfLines={1}>
+                      {certDocName || 'Certificate Document Attached (Base64)'}
+                    </Text>
+                    <Text style={{ color: '#64748B', fontSize: 11, marginTop: 4 }}>
+                      Tap to replace • Ready for verification
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.uploadDocIconCircle}>
+                      <Text style={{ fontSize: 20 }}>📄</Text>
+                    </View>
+                    <Text style={styles.uploadTapText}>Tap to upload document or photo</Text>
+                    <Text style={styles.uploadFormatText}>PDF, JPG or PNG • Max 10MB</Text>
+                  </>
+                )}
               </Pressable>
             </View>
 
@@ -648,20 +729,27 @@ export function FarmerVerificationFlow({
             {/* Upload Deed Document */}
             <View style={styles.uploadSection}>
               <Pressable
-                style={styles.uploadDashedBox}
-                onPress={() => {
-                  setDeedDocUploaded(true);
-                  Alert.alert('Ownership Document', 'Land deed document selected.');
-                }}>
-                <View style={styles.uploadDocIconCircle}>
-                  <Text style={{ fontSize: 20 }}>📑</Text>
-                </View>
-                <Text style={styles.uploadTapText}>
-                  {deedDocUploaded
-                    ? '✓ Land deed document attached'
-                    : 'Tap to upload deed document'}
-                </Text>
-                <Text style={styles.uploadFormatText}>PDF, JPG or PNG • Max 10MB</Text>
+                style={[styles.uploadDashedBox, deedDocUri ? { borderColor: '#1E5E3A', padding: 8 } : null]}
+                onPress={handleUploadDeedDoc}>
+                {deedDocUri ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                    <Text style={{ fontSize: 28 }}>📑</Text>
+                    <Text style={{ color: '#166534', fontWeight: '700', fontSize: 13, marginTop: 6 }} numberOfLines={1}>
+                      {deedDocName || 'Ownership Evidence Attached (Base64)'}
+                    </Text>
+                    <Text style={{ color: '#64748B', fontSize: 11, marginTop: 4 }}>
+                      Tap to replace • Ready for verification
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.uploadDocIconCircle}>
+                      <Text style={{ fontSize: 20 }}>📑</Text>
+                    </View>
+                    <Text style={styles.uploadTapText}>Tap to upload proof of ownership</Text>
+                    <Text style={styles.uploadFormatText}>PDF, JPG or PNG • Max 10MB</Text>
+                  </>
+                )}
               </Pressable>
             </View>
 
@@ -746,12 +834,20 @@ export function FarmerVerificationFlow({
               <View style={{ flex: 1 }}>
                 <Text style={styles.reviewCardTitle}>NIC Documents</Text>
                 <View style={styles.nicMiniPreviews}>
-                  <View style={styles.nicMiniTile}>
-                    <Text style={styles.nicMiniText}>NIC Front</Text>
-                  </View>
-                  <View style={styles.nicMiniTile}>
-                    <Text style={styles.nicMiniText}>NIC Back</Text>
-                  </View>
+                  {nicFrontUri ? (
+                    <Image source={{ uri: nicFrontUri }} style={[styles.nicMiniTile, { width: 44, height: 44, borderRadius: 6 }]} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.nicMiniTile}>
+                      <Text style={styles.nicMiniText}>NIC Front</Text>
+                    </View>
+                  )}
+                  {nicBackUri ? (
+                    <Image source={{ uri: nicBackUri }} style={[styles.nicMiniTile, { width: 44, height: 44, borderRadius: 6 }]} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.nicMiniTile}>
+                      <Text style={styles.nicMiniText}>NIC Back</Text>
+                    </View>
+                  )}
                 </View>
               </View>
               <Pressable onPress={() => setStep('upload-nic')}>
@@ -767,6 +863,7 @@ export function FarmerVerificationFlow({
                 <Text style={styles.reviewCardTitle}>Certifications</Text>
                 <Text style={styles.reviewCardValue}>
                   {certType} • {certNumber}
+                  {certDocName ? ` (${certDocName})` : ''}
                 </Text>
               </View>
               <Pressable onPress={() => setStep('farm-certifications')}>
@@ -780,7 +877,10 @@ export function FarmerVerificationFlow({
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.reviewCardTitle}>Ownership Evidence</Text>
-                <Text style={styles.reviewCardValue}>Land Deed / Title Document</Text>
+                <Text style={styles.reviewCardValue}>
+                  {ownershipDocType === 'deed' ? 'Land Deed' : ownershipDocType === 'br' ? 'Business Registration' : 'Grama Niladhari Letter'}
+                  {deedDocName ? ` • ${deedDocName}` : ''}
+                </Text>
               </View>
               <Pressable onPress={() => setStep('ownership-evidence')}>
                 <Text style={styles.reviewEditLink}>Edit</Text>

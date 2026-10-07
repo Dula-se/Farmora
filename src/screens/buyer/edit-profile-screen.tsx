@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getStoredUser, updateProfileApi, ApiUser } from '@/services/api';
+import { promptMediaSource } from '@/services/media-picker';
 
 interface EditProfileScreenProps {
   onBack?: () => void;
@@ -27,6 +28,7 @@ const CATEGORIES = ['Vegetables', 'Fruits', 'Paddy/Grains', 'Spices', 'Tea', 'He
 
 export function EditProfileScreen({ onBack, onSaved }: EditProfileScreenProps) {
   const [loading, setLoading] = useState(false);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [email, setEmail] = useState('');
@@ -41,9 +43,24 @@ export function EditProfileScreen({ onBack, onSaved }: EditProfileScreenProps) {
         setMobileNumber(user.mobileNumber || '');
         setEmail(user.email || '');
         setBuyerType(user.buyerType || 'Individual');
+        if (user.avatarUrl) {
+          setAvatarUri(user.avatarUrl);
+        }
       }
     });
   }, []);
+
+  const handleChangeAvatar = () => {
+    promptMediaSource({
+      title: 'Profile Picture',
+      message: 'Take a new photo with camera or choose from your gallery:',
+      allowsEditing: true,
+      aspect: [1, 1],
+      onSelected: (result) => {
+        setAvatarUri(result.dataUrl);
+      },
+    });
+  };
 
   const toggleCategory = (cat: string) => {
     if (selectedCategories.includes(cat)) {
@@ -65,6 +82,7 @@ export function EditProfileScreen({ onBack, onSaved }: EditProfileScreenProps) {
         fullName: fullName.trim(),
         email: email.trim() || undefined,
         buyerType,
+        avatarUrl: avatarUri || undefined,
       });
       Alert.alert('Success', 'Profile updated successfully!', [
         { text: 'OK', onPress: () => (onSaved ? onSaved() : onBack?.()) },
@@ -101,17 +119,23 @@ export function EditProfileScreen({ onBack, onSaved }: EditProfileScreenProps) {
             <View style={styles.avatarWrapper}>
               <Image
                 source={{
-                  uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
+                  uri:
+                    avatarUri ||
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
                 }}
                 style={styles.avatarImage}
               />
               <Pressable
                 style={styles.cameraBadge}
-                onPress={() => Alert.alert('Avatar Photo', 'Take photo or choose from library')}>
+                onPress={handleChangeAvatar}>
                 <Text style={styles.cameraIcon}>📷</Text>
               </Pressable>
             </View>
-            <Text style={styles.changePhotoText}>Change Profile Photo</Text>
+            <Pressable onPress={handleChangeAvatar}>
+              <Text style={styles.changePhotoText}>
+                {avatarUri ? 'Change Profile Photo' : 'Upload Profile Photo'}
+              </Text>
+            </Pressable>
           </View>
 
           {/* Form */}

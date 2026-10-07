@@ -24,6 +24,7 @@ import { OtpVerificationScreen } from '@/screens/auth/otp-verification-screen';
 import { ResetPasswordScreen } from '@/screens/auth/reset-password-screen';
 import { RegistrationSuccessScreen } from '@/screens/auth/registration-success-screen';
 import { MarketplaceFlow } from '@/screens/buyer/marketplace-flow';
+import { FarmerFlow } from '@/screens/farmer/farmer-flow';
 import { fetchProduceListings, ApiProduceItem, getStoredUser, ApiUser } from '@/services/api';
 import { Spacing } from '@/constants/theme';
 
@@ -77,18 +78,17 @@ export default function HomeScreen() {
   };
 
   if (viewMode === 'marketplace') {
+    if (currentUser?.accountType === 'farmer') {
+      return (
+        <View style={{ flex: 1 }}>
+          <FarmerFlow onBackToAuth={() => setViewMode('flow-explorer')} />
+        </View>
+      );
+    }
+
     return (
       <View style={{ flex: 1 }}>
         <MarketplaceFlow onBackToAuth={() => setViewMode('flow-explorer')} />
-
-        {/* Floating Quick Switcher */}
-        <SafeAreaView style={styles.floatingSwitcher}>
-          <Pressable
-            style={styles.switcherPill}
-            onPress={() => setViewMode('flow-explorer')}>
-            <Text style={styles.switcherPillText}>🔄 Auth & Flow Explorer</Text>
-          </Pressable>
-        </SafeAreaView>
       </View>
     );
   }

@@ -138,11 +138,15 @@ export function FarmerDashboardScreen({
           <Pressable
             style={styles.avatarBtn}
             onPress={onOpenProfile}>
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarLetter}>
-                {farmerName.charAt(0)}
-              </Text>
-            </View>
+            {user?.avatarUrl ? (
+              <Image source={{ uri: user.avatarUrl }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarLetter}>
+                  {farmerName.charAt(0)}
+                </Text>
+              </View>
+            )}
           </Pressable>
         </View>
       </View>
