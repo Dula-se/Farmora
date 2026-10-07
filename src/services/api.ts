@@ -2,29 +2,16 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Determine backend IP dynamically:
-// - Physical device with Expo Go gets Metro bundler host IP (e.g. 192.168.8.107)
-// - Emulator / Simulator gets localhost or 10.0.2.2
-function getBackendHost(): string {
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip && ip !== 'localhost') {
-      return ip;
-    }
-  }
-  return Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-}
-
-const host = getBackendHost();
+// Hosted Production Backend on Vercel
+export const BACKEND_URL = 'https://farmora-ten.vercel.app';
 
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL || `http://${host}:5001/api`;
+  process.env.EXPO_PUBLIC_API_BASE_URL || `${BACKEND_URL}/api`;
 
 export const UPLOADS_BASE_URL =
-  process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || `http://${host}:5001/uploads`;
+  process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || `${BACKEND_URL}/uploads`;
 
-console.log(`[Famora API] Connected to MongoDB backend at: ${API_BASE_URL}`);
+console.log(`[Famora API] Connected to hosted Vercel backend at: ${API_BASE_URL}`);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export interface ApiUser {
