@@ -8,3 +8,5 @@ uploads/*
 !uploads/documents/.gitkeep
 *.log
 .DS_Store
+.vercel
+build/

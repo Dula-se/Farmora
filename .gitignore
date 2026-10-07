@@ -44,3 +44,25 @@ backend/uploads/*
 !backend/uploads/*/.gitkeep
 backend/.env
 
+# Android build outputs & local environment
+android/.gradle/
+android/build/
+android/app/build/
+android/.cxx/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/*.iml
+*.apk
+*.aab
+
+# Vercel
+.vercel/
+backend/.vercel/
+
+# General build artifacts & logs
+build/
+*.jsbundle
+*.log
+
+

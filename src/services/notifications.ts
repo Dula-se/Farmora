@@ -45,7 +45,6 @@ export async function setupAndroidChannel(): Promise<void> {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#1E5E3A',
-      sound: 'default',
       enableVibrate: true,
       showBadge: true,
     });
@@ -164,7 +163,7 @@ export async function sendLocalNotification(
       title,
       body,
       data: data ?? {},
-      sound: 'default',
+      sound: true,
     },
     trigger: null, // fire immediately
   });
@@ -185,7 +184,7 @@ export async function scheduleNotification(
       title,
       body,
       data: data ?? {},
-      sound: 'default',
+      sound: true,
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
