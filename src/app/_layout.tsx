@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StyleSheet, View, useColorScheme } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import type * as Notifications from 'expo-notifications';
 import { useNotifications } from '@/hooks/use-notifications';
 
 import { FarmoraSplashScreen } from '@/components/splash-screen';

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Modal,
   Platform,
   Pressable,
@@ -7,10 +9,14 @@ import {
   Text,
   TextInput,
   View,
-  ActivityIndicator,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { googleAuthApi, ApiUser } from './api';
+import { ApiUser, getAuthToken } from './api';
+import {
+  signInWithRealGoogleAccount,
+  authenticateRealGmailWithFirebase,
+  isExpoGo,
+} from './firebase-google-auth';
 
 export interface GoogleAuthModalProps {
   visible: boolean;
@@ -20,24 +26,6 @@ export interface GoogleAuthModalProps {
   onSuccess: (user: ApiUser, token: string) => void;
 }
 
-const DEFAULT_GOOGLE_PROFILES = [
-  {
-    email: 'dushan.agro@gmail.com',
-    fullName: 'Dushan Pasindu',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
-  },
-  {
-    email: 'kamal.perera.farm@gmail.com',
-    fullName: 'Kamal Perera',
-    avatar: 'https://images.unsplash.com/photo-1544717302-de2939b7ef71?w=100',
-  },
-  {
-    email: 'sunil.freshbuyers@gmail.com',
-    fullName: 'Sunil Dissanayake',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-  },
-];
-
 export function GoogleAuthModal({
   visible,
   accountType = 'buyer',
@@ -46,48 +34,54 @@ export function GoogleAuthModal({
   onSuccess,
 }: GoogleAuthModalProps) {
   const [loading, setLoading] = useState(false);
-  const [customEmail, setCustomEmail] = useState('');
-  const [customName, setCustomName] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [realGmail, setRealGmail] = useState('chanukadushan1030@gmail.com');
+  const [realPassword, setRealPassword] = useState('');
+  const [fullName, setFullName] = useState('Chanuka Dushan');
+  // In Expo Go, default to direct Gmail entry to prevent TurboModule crashes
+  const [useOAuthPrompt, setUseOAuthPrompt] = useState(!isExpoGo);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSelectProfile = async (profile: { email: string; fullName: string; avatar?: string }) => {
+  // 1. Launch Real Google Sign-In (Web popup or Native Play Services sheet)
+  const handleRealGoogleSignIn = async () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const res = await googleAuthApi({
-        email: profile.email,
-        fullName: profile.fullName,
-        avatarUrl: profile.avatar,
-        googleId: `google_${profile.email.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      const { user } = await signInWithRealGoogleAccount({
         accountType,
         buyerType,
       });
-
-      if (res.user && res.token) {
-        onSuccess(res.user, res.token);
-        onClose();
-      } else {
-        setErrorMsg('Google sign in failed. Please try again.');
-      }
+      const token = (await getAuthToken()) || '';
+      onSuccess(user, token);
+      onClose();
     } catch (err: any) {
-      console.error('Google auth error:', err);
-      setErrorMsg(err.message || 'Could not authenticate with Google.');
+      console.warn('[Google Auth] Sign-in notice:', err.message);
+      setErrorMsg(err.message || 'Could not complete Google sign-in.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCustomSubmit = () => {
-    if (!customEmail.trim() || !customEmail.includes('@')) {
-      setErrorMsg('Please enter a valid Google email address.');
-      return;
+  // 2. Direct Real Google Account Sync (for testing in Expo Go)
+  const handleDirectGoogleSync = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const { user } = await authenticateRealGmailWithFirebase({
+        email: realGmail.trim(),
+        fullName: fullName.trim() || undefined,
+        accountType,
+        buyerType,
+      });
+
+      const token = (await getAuthToken()) || '';
+      onSuccess(user, token);
+      onClose();
+    } catch (err: any) {
+      console.error('[Google Auth] Firebase Sync error:', err);
+      setErrorMsg(err.message || 'Could not authenticate Google account.');
+    } finally {
+      setLoading(false);
     }
-    const name = customName.trim() || customEmail.split('@')[0];
-    handleSelectProfile({
-      email: customEmail.trim(),
-      fullName: name,
-    });
   };
 
   return (
@@ -97,7 +91,7 @@ export function GoogleAuthModal({
           {/* Google G Logo Header */}
           <View style={styles.header}>
             <View style={styles.gLogoBadge}>
-              <Svg width={24} height={24} viewBox="0 0 24 24">
+              <Svg width={26} height={26} viewBox="0 0 24 24">
                 <Path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                   fill="#4285F4"
@@ -116,9 +110,11 @@ export function GoogleAuthModal({
                 />
               </Svg>
             </View>
-            <Text style={styles.title}>Sign in with Google</Text>
+            <Text style={styles.title}>Google Sign-In</Text>
             <Text style={styles.subtitle}>
-              Choose an account to continue to <Text style={{ fontWeight: '700', color: '#2E7D32' }}>Farmora</Text> as {accountType === 'farmer' ? 'Farmer' : 'Buyer'}
+              Sign in with your verified Google account to continue to{' '}
+              <Text style={{ fontWeight: '700', color: '#2E7D32' }}>Farmora</Text> as{' '}
+              {accountType === 'farmer' ? 'Farmer' : 'Buyer'}
             </Text>
           </View>
 
@@ -131,71 +127,62 @@ export function GoogleAuthModal({
           {loading ? (
             <View style={styles.loaderBox}>
               <ActivityIndicator size="large" color="#2E7D32" />
-              <Text style={styles.loaderText}>Authenticating with Google...</Text>
-            </View>
-          ) : !showCustomInput ? (
-            <View style={styles.profileList}>
-              {DEFAULT_GOOGLE_PROFILES.map((p) => (
-                <Pressable
-                  key={p.email}
-                  style={({ pressed }) => [styles.profileItem, pressed && styles.profileItemPressed]}
-                  onPress={() => handleSelectProfile(p)}>
-                  <View style={styles.avatarPlaceholder}>
-                    <Text style={styles.avatarInitial}>{p.fullName.charAt(0)}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.profileName}>{p.fullName}</Text>
-                    <Text style={styles.profileEmail}>{p.email}</Text>
-                  </View>
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <Path d="M9 18l6-6-6-6" />
-                  </Svg>
-                </Pressable>
-              ))}
-
-              <Pressable
-                style={styles.addAnotherBtn}
-                onPress={() => setShowCustomInput(true)}>
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M12 5v14M5 12h14" />
-                </Svg>
-                <Text style={styles.addAnotherText}>Use another Google account</Text>
-              </Pressable>
+              <Text style={styles.loaderText}>Authenticating with Firebase & Google...</Text>
             </View>
           ) : (
-            <View style={styles.customForm}>
-              <Text style={styles.inputLabel}>Enter Google Email Address</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="example@gmail.com"
-                placeholderTextColor="#94A3B8"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={customEmail}
-                onChangeText={setCustomEmail}
-              />
+            <View style={styles.contentContainer}>
+              {/* Primary Real Google Action */}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.primaryOAuthBtn,
+                  pressed && styles.primaryOAuthBtnPressed,
+                ]}
+                onPress={handleRealGoogleSignIn}>
+                <View style={styles.gMiniCircle}>
+                  <Text style={styles.gMiniText}>G</Text>
+                </View>
+                <Text style={styles.primaryOAuthBtnText}>
+                  {Platform.OS === 'web'
+                    ? 'Sign in with Google Popup'
+                    : 'Open Google Account Picker'}
+                </Text>
+              </Pressable>
 
-              <Text style={[styles.inputLabel, { marginTop: 10 }]}>Display Name (Optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Your Name"
-                placeholderTextColor="#94A3B8"
-                value={customName}
-                onChangeText={setCustomName}
-              />
-
-              <View style={styles.customActions}>
-                <Pressable
-                  style={styles.cancelCustomBtn}
-                  onPress={() => setShowCustomInput(false)}>
-                  <Text style={styles.cancelCustomText}>Back</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.confirmCustomBtn}
-                  onPress={handleCustomSubmit}>
-                  <Text style={styles.confirmCustomText}>Continue</Text>
-                </Pressable>
+              {/* Verified Real Gmail Quick-Sign-In Tile */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or continue with verified account</Text>
+                <View style={styles.dividerLine} />
               </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.userTile,
+                  pressed && styles.userTilePressed,
+                ]}
+                onPress={handleDirectGoogleSync}>
+                <View style={styles.avatarCircle}>
+                  <Text style={styles.avatarLetter}>C</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tileName}>Chanuka Dushan</Text>
+                  <Text style={styles.tileEmail}>{realGmail}</Text>
+                </View>
+                <View style={styles.googleVerifiedBadge}>
+                  <Text style={styles.googleVerifiedText}>Google</Text>
+                </View>
+              </Pressable>
+
+              {isExpoGo && Platform.OS !== 'web' && (
+                <View style={styles.expoNoticeBox}>
+                  <Text style={styles.expoNoticeTitle}>💡 Expo Go Note:</Text>
+                  <Text style={styles.expoNoticeDesc}>
+                    Google's native Play Services sheet requires an Android build (
+                    <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>). In Expo Go, tap the account above to sign in, or test on Web (
+                    <Text style={{ fontWeight: '700' }}>npm run web</Text>) for the live Google popup!
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -218,33 +205,33 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 24,
+    padding: 24,
     width: '100%',
-    maxWidth: 380,
-    padding: 22,
+    maxWidth: 420,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
-    shadowRadius: 16,
+    shadowRadius: 20,
     elevation: 8,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   gLogoBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#F8FAFC',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     color: '#0F172A',
     marginBottom: 4,
@@ -256,19 +243,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   errorBox: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 12,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 16,
   },
   errorText: {
-    color: '#DC2626',
     fontSize: 12,
+    color: '#B91C1C',
     textAlign: 'center',
-    fontWeight: '600',
+    lineHeight: 16,
   },
   loaderBox: {
-    paddingVertical: 30,
+    paddingVertical: 32,
     alignItems: 'center',
     gap: 12,
   },
@@ -277,108 +266,133 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontWeight: '600',
   },
-  profileList: {
-    gap: 10,
-    marginBottom: 16,
+  contentContainer: {
+    gap: 12,
+    marginBottom: 8,
   },
-  profileItem: {
+  primaryOAuthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A73E8',
+    height: 52,
+    borderRadius: 14,
+    gap: 12,
+    shadowColor: '#1A73E8',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryOAuthBtnPressed: {
+    backgroundColor: '#1557B0',
+  },
+  gMiniCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gMiniText: {
+    color: '#1A73E8',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  primaryOAuthBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  dividerText: {
+    paddingHorizontal: 10,
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  userTile: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
+    borderRadius: 16,
+    padding: 12,
     gap: 12,
   },
-  profileItemPressed: {
+  userTilePressed: {
     backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
   },
-  avatarPlaceholder: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#DCFCE7',
-    justifyContent: 'center',
+  avatarCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#1A73E8',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarInitial: {
-    fontSize: 16,
+  avatarLetter: {
+    color: '#FFFFFF',
+    fontSize: 18,
     fontWeight: '800',
-    color: '#166534',
   },
-  profileName: {
+  tileName: {
     fontSize: 14,
     fontWeight: '700',
     color: '#0F172A',
   },
-  profileEmail: {
+  tileEmail: {
     fontSize: 12,
     color: '#64748B',
-    marginTop: 1,
+    marginTop: 2,
   },
-  addAnotherBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-  },
-  addAnotherText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-  customForm: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: '#F8FAFC',
+  googleVerifiedBadge: {
+    backgroundColor: '#E8F0FE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#0F172A',
+    borderColor: '#D2E3FC',
   },
-  customActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
-  cancelCustomBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-  },
-  cancelCustomText: {
-    fontSize: 13,
+  googleVerifiedText: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#475569',
+    color: '#1A73E8',
   },
-  confirmCustomBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
+  expoNoticeBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginTop: 4,
   },
-  confirmCustomText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  expoNoticeTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E40AF',
+    marginBottom: 4,
+  },
+  expoNoticeDesc: {
+    fontSize: 11,
+    color: '#1E3A8A',
+    lineHeight: 16,
   },
   closeBtn: {
-    paddingVertical: 10,
+    marginTop: 12,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   closeBtnText: {
