@@ -7,12 +7,71 @@ export interface IUser extends Document {
   fullName: string;
   mobileNumber: string;
   email?: string;
+  googleId?: string;
   passwordHash?: string;
   accountType: AccountType;
   district?: string;
   address?: string;
   avatarUrl?: string;
   isVerified: boolean;
+  buyerType?: string;
+  businessDetails?: {
+    businessName?: string;
+    businessType?: string;
+    regNumber?: string;
+    contactPerson?: string;
+    businessAddress?: string;
+    monthlyVolume?: string;
+    preferredCategories?: string[];
+  };
+  farmDetails?: {
+    farmName?: string;
+    farmCategory?: string;
+    farmType?: string;
+    totalArea?: string;
+    farmingMethod?: string;
+    primaryCrops?: string[];
+    certifications?: string[];
+    bio?: string;
+    nicNumber?: string;
+    preferredLanguage?: string;
+    streetAddress?: string;
+    city?: string;
+    landmark?: string;
+    latitude?: number;
+    longitude?: number;
+    coverImage?: string;
+    photos?: string[];
+    videoUrl?: string;
+    pickupAvailable?: boolean;
+    directDeliveryAvailable?: boolean;
+    deliveryRadius?: number;
+    deliveryCharge?: number;
+    freeDeliveryMin?: number;
+    deliveryDays?: string[];
+    bankName?: string;
+    branch?: string;
+    accountName?: string;
+    accountNumber?: string;
+    mobileWallet?: string;
+    onboardingProgress?: number;
+  };
+  savedAddresses?: Array<{
+    id: string;
+    label: string;
+    recipientName: string;
+    mobileNumber: string;
+    address: string;
+    district: string;
+    postalCode?: string;
+    isDefault: boolean;
+  }>;
+  favouriteFarms?: string[];
+  securitySettings?: {
+    twoFactorEnabled: boolean;
+    biometricEnabled: boolean;
+    activeDevices: Array<{ deviceName: string; location: string; lastActive: string }>;
+  };
   pushToken?: string;
   pushTokenUpdatedAt?: Date;
   createdAt: Date;
@@ -23,6 +82,7 @@ export interface IUser extends Document {
 export interface IUserModel extends Model<IUser> {
   findByMobile(mobile: string): Promise<IUser | null>;
   findByEmail(email: string): Promise<IUser | null>;
+  findByGoogleId(googleId: string): Promise<IUser | null>;
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -44,7 +104,8 @@ const userSchema = new Schema<IUser, IUserModel>(
       trim: true,
       index: true,
     },
-    passwordHash: { type: String, required: true },
+    googleId: { type: String, sparse: true, index: true },
+    passwordHash: { type: String },
     accountType: {
       type: String,
       required: true,
@@ -54,6 +115,22 @@ const userSchema = new Schema<IUser, IUserModel>(
     address: { type: String, trim: true },
     avatarUrl: { type: String },
     isVerified: { type: Boolean, default: false },
+    buyerType: { type: String },
+    businessDetails: { type: Schema.Types.Mixed },
+    farmDetails: { type: Schema.Types.Mixed },
+    savedAddresses: { type: [Schema.Types.Mixed], default: [] },
+    favouriteFarms: { type: [String], default: [] },
+    securitySettings: {
+      type: Schema.Types.Mixed,
+      default: {
+        twoFactorEnabled: false,
+        biometricEnabled: true,
+        activeDevices: [
+          { deviceName: 'Samsung Galaxy A54 (Current)', location: 'Colombo, Sri Lanka', lastActive: 'Active Now' },
+          { deviceName: 'Chrome on Windows 11', location: 'Kandy, Sri Lanka', lastActive: '2 days ago' },
+        ],
+      },
+    },
     pushToken: { type: String },
     pushTokenUpdatedAt: { type: Date },
   },
@@ -85,6 +162,10 @@ userSchema.statics.findByMobile = function (mobile: string) {
 
 userSchema.statics.findByEmail = function (email: string) {
   return this.findOne({ email: email.toLowerCase().trim() });
+};
+
+userSchema.statics.findByGoogleId = function (googleId: string) {
+  return this.findOne({ googleId });
 };
 
 // ─── Indexes ──────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import {
 } from '@/screens/auth/select-account-type-screen';
 import { LoginScreen } from '@/screens/auth/login-screen';
 import { RegisterScreen } from '@/screens/auth/register-screen';
+import { BuyerRegisterScreen } from '@/screens/auth/buyer-register-screen';
 import { RegistrationSuccessScreen } from '@/screens/auth/registration-success-screen';
 import { ForgotPasswordScreen } from '@/screens/auth/forgot-password-screen';
 import { OtpVerificationScreen } from '@/screens/auth/otp-verification-screen';
@@ -136,6 +137,19 @@ export default function TabLayout() {
         );
 
       case 'register':
+        if (accountType === 'buyer') {
+          return (
+            <BuyerRegisterScreen
+              onBackToLogin={() => setCurrentStep('login')}
+              onRegisterSuccess={(user) => {
+                if (user?.accountType) {
+                  setAccountType(user.accountType);
+                }
+                setCurrentStep('authenticated');
+              }}
+            />
+          );
+        }
         return (
           <RegisterScreen
             accountType={accountType}
@@ -166,7 +180,8 @@ export default function TabLayout() {
       case 'otp':
         return (
           <OtpVerificationScreen
-            phoneNumber={resetIdentifier}
+            phoneNumber={resetIdentifier.includes('@') ? '+94 77 123 4567' : resetIdentifier}
+            email={resetIdentifier.includes('@') ? resetIdentifier : 'farmer@famora.lk'}
             onBack={() => setCurrentStep('forgot-password')}
             onChangeNumber={() => setCurrentStep('forgot-password')}
             onVerify={() => setCurrentStep('reset-password')}

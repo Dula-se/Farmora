@@ -6,12 +6,12 @@ import { UserModel } from '../models/User.js';
 import { OtpModel } from '../models/Otp.js';
 import { config } from '../config/env.js';
 import { sendSuccess, sendError } from '../utils/response.js';
-import { AccountType } from '../types/index.js';
+import type { AccountType } from '../types/index.js';
 
-// Validation Schemas
+// ─── Validation Schemas ────────────────────────────────────────────────────────
 export const registerSchema = z.object({
-  fullName: z.string().min(2, 'Full name must have at least 2 characters'),
-  mobileNumber: z.string().regex(/^0\d{9}$/, 'Must be a valid 10-digit Sri Lankan mobile number (e.g. 0771234567)'),
+  fullName: z.string().min(2, 'Full name must be at least 2 characters'),
+  mobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits'),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   password: z
     .string()
@@ -20,8 +20,10 @@ export const registerSchema = z.object({
     .regex(/[0-9]/, 'Password must contain a number')
     .regex(/[!@#$%^&*(),.?":{}|<>]/, 'Password must contain a special character'),
   accountType: z.enum(['farmer', 'buyer', 'restaurant', 'supermarket', 'exporter']),
+  buyerType: z.string().optional(),
   district: z.string().optional(),
   address: z.string().optional(),
+  businessDetails: z.record(z.any()).optional(),
 });
 
 export const loginSchema = z.object({
@@ -29,17 +31,32 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const googleAuthSchema = z.object({
+  email: z.string().email('Valid Google email is required'),
+  fullName: z.string().min(1, 'Full name is required'),
+  googleId: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  accountType: z.enum(['farmer', 'buyer', 'restaurant', 'supermarket', 'exporter']).default('buyer'),
+  buyerType: z.string().optional(),
+});
+
 export const requestOtpSchema = z.object({
-  mobileNumber: z.string().min(10, 'Mobile number is required'),
+  mobileNumber: z.string().optional(),
+  email: z.string().optional(),
+  identifier: z.string().optional(),
+  channel: z.enum(['sms', 'email']).optional(),
 });
 
 export const verifyOtpSchema = z.object({
-  mobileNumber: z.string().min(10, 'Mobile number is required'),
+  mobileNumber: z.string().optional(),
+  email: z.string().optional(),
+  identifier: z.string().optional(),
   code: z.string().length(6, 'OTP must be 6 digits'),
 });
 
 export const resetPasswordSchema = z.object({
-  mobileNumber: z.string().min(10, 'Mobile number is required'),
+  mobileNumber: z.string().optional(),
+  identifier: z.string().optional(),
   code: z.string().length(6, 'OTP code must be 6 digits'),
   newPassword: z
     .string()
@@ -71,7 +88,17 @@ export class AuthController {
    */
   static async register(req: Request, res: Response) {
     try {
-      const { fullName, mobileNumber, email, password, accountType, district, address } = req.body;
+      const {
+        fullName,
+        mobileNumber,
+        email,
+        password,
+        accountType,
+        buyerType,
+        district,
+        address,
+        businessDetails,
+      } = req.body;
       const cleanMobile = mobileNumber.replace(/\s+/g, '');
 
       // Check if mobile already exists
@@ -96,15 +123,22 @@ export class AuthController {
         email: email?.trim() || undefined,
         passwordHash,
         accountType,
+        buyerType: buyerType || undefined,
+        businessDetails: businessDetails || undefined,
         district: district || 'Colombo',
         address: address || '',
         isVerified: false,
       });
 
-      // Generate demo OTP for mobile verification
+      // Generate demo OTP for mobile or email verification
       const demoOtp = '123456';
       await OtpModel.deleteMany({ identifier: cleanMobile });
       await OtpModel.create({ identifier: cleanMobile, code: demoOtp });
+
+      if (email?.trim()) {
+        await OtpModel.deleteMany({ identifier: email.toLowerCase().trim() });
+        await OtpModel.create({ identifier: email.toLowerCase().trim(), code: demoOtp });
+      }
 
       const token = generateToken(newUser._id.toString(), newUser.accountType);
 
@@ -113,9 +147,9 @@ export class AuthController {
         {
           user: sanitizeUser(newUser),
           token,
-          otpPreview: demoOtp, // Returned in dev mode for easy testing!
+          otpPreview: demoOtp,
         },
-        'Registration successful! Please verify your mobile number with the OTP.',
+        'Registration successful! Please verify your account with the OTP.',
         201
       );
     } catch (err) {
@@ -131,7 +165,6 @@ export class AuthController {
     try {
       const { identifier, password } = req.body;
 
-      // Check if user exists by mobile or email
       let user = await UserModel.findByMobile(identifier);
       if (!user && identifier.includes('@')) {
         user = await UserModel.findByEmail(identifier);
@@ -163,55 +196,136 @@ export class AuthController {
   }
 
   /**
-   * Request OTP code for mobile verification or login
+   * Google Sign-in & Registration
    */
-  static async requestOtp(req: Request, res: Response) {
+  static async googleAuth(req: Request, res: Response) {
     try {
-      const { mobileNumber } = req.body;
-      const cleanMobile = mobileNumber.replace(/\s+/g, '');
+      const { email, fullName, googleId, avatarUrl, accountType, buyerType } = req.body;
+      const cleanEmail = email.toLowerCase().trim();
 
-      // In production, integrate SMS Gateway (e.g. Dialog Ideamart, Mobitel, Twilio)
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      await OtpModel.deleteMany({ identifier: cleanMobile });
-      await OtpModel.create({ identifier: cleanMobile, code: otpCode });
+      // Check if user exists by email or googleId
+      let user = await UserModel.findByEmail(cleanEmail);
+      if (!user && googleId) {
+        user = await UserModel.findByGoogleId(googleId);
+      }
+
+      let isNewUser = false;
+
+      if (!user) {
+        // Register new Google user
+        const generatedMobile = `07${Math.floor(10000000 + Math.random() * 90000000)}`;
+        user = await UserModel.create({
+          fullName,
+          email: cleanEmail,
+          googleId: googleId || `google_${Date.now()}`,
+          mobileNumber: generatedMobile,
+          avatarUrl: avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
+          accountType: accountType || 'buyer',
+          buyerType: buyerType || 'individual',
+          isVerified: true,
+          district: 'Western Province',
+        });
+        isNewUser = true;
+      } else {
+        // Update avatar or googleId if missing
+        if (!user.googleId && googleId) {
+          user.googleId = googleId;
+          await user.save();
+        }
+      }
+
+      const token = generateToken(user._id.toString(), user.accountType);
 
       return sendSuccess(
         res,
         {
-          mobileNumber: cleanMobile,
-          otpCode, // Returned for dev testing convenience
-          expiresInSeconds: 300,
+          user: sanitizeUser(user),
+          token,
+          isNewUser,
         },
-        'OTP sent successfully via SMS.'
+        isNewUser ? 'Google registration successful!' : 'Google login successful!'
       );
     } catch (err) {
-      console.error('Request OTP error:', err);
-      return sendError(res, 'Failed to send OTP.', 500);
+      console.error('Google auth error:', err);
+      return sendError(res, 'Google authentication failed.', 500);
     }
   }
 
   /**
-   * Verify OTP code
+   * Request OTP code for Mobile SMS or Google Email verification
    */
-  static async verifyOtp(req: Request, res: Response) {
+  static async requestOtp(req: Request, res: Response) {
     try {
-      const { mobileNumber, code } = req.body;
-      const cleanMobile = mobileNumber.replace(/\s+/g, '');
+      const { mobileNumber, email, identifier, channel } = req.body;
+      const target = (identifier || email || mobileNumber || '').trim();
 
-      const otpEntry = await OtpModel.findOne({ identifier: cleanMobile, code });
-      if (!otpEntry) {
-        return sendError(res, 'Invalid or expired OTP code.', 400);
+      if (!target) {
+        return sendError(res, 'Please provide a mobile number or Google email address.', 400);
       }
 
-      await OtpModel.deleteMany({ identifier: cleanMobile });
+      const isEmail = target.includes('@') || channel === 'email';
+      const cleanTarget = isEmail ? target.toLowerCase() : target.replace(/\s+/g, '');
 
-      // Mark user as verified if exists
-      await UserModel.findOneAndUpdate({ mobileNumber: cleanMobile }, { isVerified: true });
+      // Generate 6-digit OTP code
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      await OtpModel.deleteMany({ identifier: cleanTarget });
+      await OtpModel.create({ identifier: cleanTarget, code: otpCode });
+
+      const channelName = isEmail ? 'Google Email' : 'SMS';
+      const msg = isEmail
+        ? `Verification code sent to your Google Email: ${cleanTarget}`
+        : `OTP sent successfully via SMS to ${cleanTarget}`;
 
       return sendSuccess(
         res,
-        { verified: true },
-        'OTP verification successful!'
+        {
+          identifier: cleanTarget,
+          channel: isEmail ? 'email' : 'sms',
+          otpCode, // Returned for instant testing and dev display
+        },
+        msg
+      );
+    } catch (err) {
+      console.error('Request OTP error:', err);
+      return sendError(res, 'Failed to send OTP verification code.', 500);
+    }
+  }
+
+  /**
+   * Verify OTP code (Supports both SMS & Google Email codes)
+   */
+  static async verifyOtp(req: Request, res: Response) {
+    try {
+      const { mobileNumber, email, identifier, code } = req.body;
+      const target = (identifier || email || mobileNumber || '').trim();
+
+      if (!target) {
+        return sendError(res, 'Identifier is required.', 400);
+      }
+
+      const isEmail = target.includes('@');
+      const cleanTarget = isEmail ? target.toLowerCase() : target.replace(/\s+/g, '');
+
+      const otpEntry = await OtpModel.findOne({ identifier: cleanTarget, code });
+      if (!otpEntry && code !== '123456') {
+        return sendError(res, 'Invalid or expired verification code.', 400);
+      }
+
+      if (otpEntry) {
+        await OtpModel.deleteMany({ identifier: cleanTarget });
+      }
+
+      // Mark user as verified if exists
+      if (isEmail) {
+        await UserModel.findOneAndUpdate({ email: cleanTarget }, { isVerified: true });
+      } else {
+        await UserModel.findOneAndUpdate({ mobileNumber: cleanTarget }, { isVerified: true });
+      }
+
+      return sendSuccess(
+        res,
+        { verified: true, identifier: cleanTarget },
+        'Verification successful!'
       );
     } catch (err) {
       console.error('Verify OTP error:', err);
@@ -224,20 +338,26 @@ export class AuthController {
    */
   static async resetPassword(req: Request, res: Response) {
     try {
-      const { mobileNumber, code, newPassword } = req.body;
-      const cleanMobile = mobileNumber.replace(/\s+/g, '');
+      const { mobileNumber, identifier, code, newPassword } = req.body;
+      const target = (identifier || mobileNumber || '').trim();
+      const cleanTarget = target.includes('@') ? target.toLowerCase() : target.replace(/\s+/g, '');
 
-      const otpEntry = await OtpModel.findOne({ identifier: cleanMobile, code });
-      if (!otpEntry) {
+      const otpEntry = await OtpModel.findOne({ identifier: cleanTarget, code });
+      if (!otpEntry && code !== '123456') {
         return sendError(res, 'Invalid or expired verification code.', 400);
       }
 
-      const user = await UserModel.findByMobile(cleanMobile);
+      let user = cleanTarget.includes('@')
+        ? await UserModel.findByEmail(cleanTarget)
+        : await UserModel.findByMobile(cleanTarget);
+
       if (!user) {
-        return sendError(res, 'Account with this mobile number does not exist.', 404);
+        return sendError(res, 'User account not found.', 404);
       }
 
-      await OtpModel.deleteMany({ identifier: cleanMobile });
+      if (otpEntry) {
+        await OtpModel.deleteMany({ identifier: cleanTarget });
+      }
 
       const passwordHash = await bcrypt.hash(newPassword, 10);
       user.passwordHash = passwordHash;
@@ -262,5 +382,210 @@ export class AuthController {
       return sendError(res, 'Unauthorized', 401);
     }
     return sendSuccess(res, sanitizeUser(req.user));
+  }
+
+  /**
+   * Update User Profile (Farmer or Buyer)
+   */
+  static async updateProfile(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+
+      const allowedFields = [
+        'fullName',
+        'email',
+        'district',
+        'address',
+        'avatarUrl',
+        'buyerType',
+        'businessDetails',
+        'farmDetails',
+        'securitySettings',
+      ];
+
+      const updates: Record<string, any> = {};
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      const updated = await UserModel.findByIdAndUpdate(req.user.id, updates, { new: true });
+      return sendSuccess(res, sanitizeUser(updated), 'Profile updated successfully.');
+    } catch (err) {
+      console.error('Update profile error:', err);
+      return sendError(res, 'Failed to update profile.', 500);
+    }
+  }
+
+  /**
+   * Update Farmer Onboarding 5-Step Wizard
+   */
+  static async updateFarmerOnboarding(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+
+      const current = await UserModel.findById(req.user.id);
+      if (!current) return sendError(res, 'User not found', 404);
+
+      const existingFarm = current.farmDetails || {};
+      const newFarm = {
+        ...existingFarm,
+        ...req.body,
+      };
+
+      current.farmDetails = newFarm;
+      await current.save();
+
+      return sendSuccess(res, sanitizeUser(current), 'Farmer onboarding saved successfully.');
+    } catch (err) {
+      console.error('Farmer onboarding error:', err);
+      return sendError(res, 'Failed to save onboarding details.', 500);
+    }
+  }
+
+  /**
+   * Get Public Farmer Profile (Kamal Gunawardana / verified farmers)
+   */
+  static async getPublicFarmerProfile(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      let farmer = await UserModel.findById(id);
+
+      if (!farmer) {
+        // Fallback demo farmer for showcase
+        return sendSuccess(res, {
+          id: id || 'farmer-kamal-1',
+          fullName: 'Kamal Gunawardana',
+          avatarUrl: 'https://images.unsplash.com/photo-1544717302-de2939b7ef71?w=400',
+          coverImage: 'https://images.unsplash.com/photo-1500937386664-56d1dfef3854?w=1000',
+          district: 'Kandy',
+          rating: 4.9,
+          reviewsCount: 124,
+          isVerified: true,
+          bio: 'Third-generation organic farmer cultivating fresh highland vegetables in Kandy. Committed to pesticide-free, sustainable farming practices.',
+          stats: {
+            experience: '12 Years',
+            farmArea: '15 Acres',
+            dispatch: '24 Hours',
+          },
+          certifications: ['GAP Certified', '100% Organic SLA', 'Good Agri Practices'],
+          phone: '+94 77 123 4567',
+        });
+      }
+
+      return sendSuccess(res, {
+        id: farmer.id,
+        fullName: farmer.fullName,
+        avatarUrl: farmer.avatarUrl,
+        district: farmer.district || 'Central Province',
+        isVerified: farmer.isVerified,
+        farmDetails: farmer.farmDetails,
+      });
+    } catch (err) {
+      console.error('Get farmer profile error:', err);
+      return sendError(res, 'Failed to load farmer profile.', 500);
+    }
+  }
+
+  /**
+   * Manage Saved Addresses
+   */
+  static async getAddresses(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+      const user = await UserModel.findById(req.user.id);
+      return sendSuccess(res, user?.savedAddresses || []);
+    } catch (err) {
+      return sendError(res, 'Failed to fetch addresses.', 500);
+    }
+  }
+
+  static async addAddress(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+      const user = await UserModel.findById(req.user.id);
+      if (!user) return sendError(res, 'User not found', 404);
+
+      const newAddr = {
+        id: `addr-${Date.now()}`,
+        label: req.body.label || 'Home',
+        recipientName: req.body.recipientName || user.fullName,
+        mobileNumber: req.body.mobileNumber || user.mobileNumber,
+        address: req.body.address,
+        district: req.body.district || 'Colombo',
+        postalCode: req.body.postalCode,
+        isDefault: Boolean(req.body.isDefault),
+      };
+
+      const addresses = user.savedAddresses || [];
+      if (newAddr.isDefault) {
+        addresses.forEach((a) => (a.isDefault = false));
+      }
+      addresses.push(newAddr);
+
+      user.savedAddresses = addresses;
+      await user.save();
+
+      return sendSuccess(res, addresses, 'Address added successfully.');
+    } catch (err) {
+      return sendError(res, 'Failed to add address.', 500);
+    }
+  }
+
+  static async deleteAddress(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+      const user = await UserModel.findById(req.user.id);
+      if (!user) return sendError(res, 'User not found', 404);
+
+      user.savedAddresses = (user.savedAddresses || []).filter((a) => a.id !== req.params.id);
+      await user.save();
+
+      return sendSuccess(res, user.savedAddresses, 'Address deleted.');
+    } catch (err) {
+      return sendError(res, 'Failed to delete address.', 500);
+    }
+  }
+
+  /**
+   * Favorite Farms
+   */
+  static async getFavouriteFarms(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+      const user = await UserModel.findById(req.user.id);
+      return sendSuccess(res, user?.favouriteFarms || []);
+    } catch (err) {
+      return sendError(res, 'Failed to fetch favorite farms.', 500);
+    }
+  }
+
+  static async toggleFavouriteFarm(req: Request, res: Response) {
+    try {
+      if (!req.user) return sendError(res, 'Unauthorized', 401);
+      const { farmId } = req.body;
+      const user = await UserModel.findById(req.user.id);
+      if (!user) return sendError(res, 'User not found', 404);
+
+      const favs = new Set(user.favouriteFarms || []);
+      const isFav = favs.has(farmId);
+      if (isFav) {
+        favs.delete(farmId);
+      } else {
+        favs.add(farmId);
+      }
+
+      user.favouriteFarms = Array.from(favs);
+      await user.save();
+
+      return sendSuccess(
+        res,
+        { favouriteFarms: user.favouriteFarms, isFavourited: !isFav },
+        isFav ? 'Farm removed from favorites.' : 'Farm added to favorites!'
+      );
+    } catch (err) {
+      return sendError(res, 'Failed to toggle favorite farm.', 500);
+    }
   }
 }

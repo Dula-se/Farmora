@@ -33,11 +33,70 @@ export interface ApiUser {
   fullName: string;
   mobileNumber: string;
   email?: string;
+  googleId?: string;
   accountType: 'farmer' | 'buyer' | 'restaurant' | 'supermarket' | 'exporter';
+  buyerType?: string;
   district?: string;
   address?: string;
   avatarUrl?: string;
   isVerified: boolean;
+  businessDetails?: {
+    businessName?: string;
+    businessType?: string;
+    regNumber?: string;
+    contactPerson?: string;
+    businessAddress?: string;
+    monthlyVolume?: string;
+    preferredCategories?: string[];
+  };
+  farmDetails?: {
+    farmName?: string;
+    farmCategory?: string;
+    farmType?: string;
+    totalArea?: string;
+    farmingMethod?: string;
+    primaryCrops?: string[];
+    certifications?: string[];
+    bio?: string;
+    nicNumber?: string;
+    preferredLanguage?: string;
+    streetAddress?: string;
+    city?: string;
+    landmark?: string;
+    latitude?: number;
+    longitude?: number;
+    coverImage?: string;
+    photos?: string[];
+    videoUrl?: string;
+    pickupAvailable?: boolean;
+    directDeliveryAvailable?: boolean;
+    deliveryRadius?: number;
+    deliveryCharge?: number;
+    freeDeliveryMin?: number;
+    deliveryDays?: string[];
+    bankName?: string;
+    branch?: string;
+    accountName?: string;
+    accountNumber?: string;
+    mobileWallet?: string;
+    onboardingProgress?: number;
+  };
+  savedAddresses?: Array<{
+    id: string;
+    label: string;
+    recipientName: string;
+    mobileNumber: string;
+    address: string;
+    district: string;
+    postalCode?: string;
+    isDefault: boolean;
+  }>;
+  favouriteFarms?: string[];
+  securitySettings?: {
+    twoFactorEnabled: boolean;
+    biometricEnabled: boolean;
+    activeDevices: Array<{ deviceName: string; location: string; lastActive: string }>;
+  };
   pushToken?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -151,8 +210,10 @@ export async function registerWithApi(payload: {
   email?: string;
   password: string;
   accountType: 'farmer' | 'buyer';
+  buyerType?: string;
   district?: string;
   address?: string;
+  businessDetails?: any;
 }): Promise<AuthResponse> {
   const result = await apiFetch<AuthResponse>('/auth/register', {
     method: 'POST',
@@ -164,36 +225,131 @@ export async function registerWithApi(payload: {
   return result.data;
 }
 
-export async function requestOtpApi(mobileNumber: string): Promise<{ otpCode?: string }> {
-  const result = await apiFetch<{ mobileNumber: string; otpCode?: string }>('/auth/otp/request', {
+export async function googleAuthApi(payload: {
+  email: string;
+  fullName: string;
+  googleId?: string;
+  avatarUrl?: string;
+  accountType?: 'farmer' | 'buyer';
+  buyerType?: string;
+}): Promise<AuthResponse & { isNewUser?: boolean }> {
+  const result = await apiFetch<AuthResponse & { isNewUser?: boolean }>('/auth/google', {
     method: 'POST',
-    body: JSON.stringify({ mobileNumber }),
+    body: JSON.stringify(payload),
   });
+  if (result.data.token && result.data.user) {
+    await saveAuthSession(result.data.token, result.data.user);
+  }
   return result.data;
 }
 
-export async function verifyOtpApi(mobileNumber: string, code: string): Promise<boolean> {
-  const result = await apiFetch<{ verified: boolean }>('/auth/otp/verify', {
+export async function requestOtpApi(
+  param: { identifier?: string; mobileNumber?: string; email?: string; channel?: 'sms' | 'email' } | string
+): Promise<{ otpCode?: string; channel?: string; identifier?: string }> {
+  const body = typeof param === 'string' ? { identifier: param } : param;
+  const result = await apiFetch<{ otpCode?: string; channel?: string; identifier?: string }>(
+    '/auth/request-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+  return result.data;
+}
+
+export async function verifyOtpApi(
+  identifierOrMobile: string,
+  code: string,
+  channel?: 'sms' | 'email'
+): Promise<boolean> {
+  const result = await apiFetch<{ verified: boolean }>('/auth/verify-otp', {
     method: 'POST',
-    body: JSON.stringify({ mobileNumber, code }),
+    body: JSON.stringify({ identifier: identifierOrMobile, code, channel }),
   });
   return Boolean(result.data?.verified);
 }
 
 export async function resetPasswordApi(
-  mobileNumber: string,
+  identifierOrMobile: string,
   code: string,
   newPassword: string
 ): Promise<string> {
   const result = await apiFetch<null>('/auth/reset-password', {
     method: 'POST',
-    body: JSON.stringify({ mobileNumber, code, newPassword }),
+    body: JSON.stringify({ identifier: identifierOrMobile, code, newPassword }),
   });
   return result.message || 'Password reset successfully';
 }
 
 export async function fetchMe(): Promise<ApiUser> {
   const result = await apiFetch<ApiUser>('/auth/me');
+  return result.data;
+}
+
+export async function updateProfileApi(updates: Partial<ApiUser>): Promise<ApiUser> {
+  const result = await apiFetch<ApiUser>('/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+  if (result.data) {
+    const token = await getAuthToken();
+    if (token) await saveAuthSession(token, result.data);
+  }
+  return result.data;
+}
+
+export async function updateFarmerOnboardingApi(data: any): Promise<ApiUser> {
+  const result = await apiFetch<ApiUser>('/auth/farmer-onboarding', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+  if (result.data) {
+    const token = await getAuthToken();
+    if (token) await saveAuthSession(token, result.data);
+  }
+  return result.data;
+}
+
+export async function fetchPublicFarmerProfile(id: string): Promise<any> {
+  const result = await apiFetch<any>(`/auth/farmer-profile/${id}`);
+  return result.data;
+}
+
+export async function fetchSavedAddresses(): Promise<any[]> {
+  const result = await apiFetch<any[]>('/auth/addresses');
+  return result.data || [];
+}
+
+export async function addSavedAddress(addr: any): Promise<any[]> {
+  const result = await apiFetch<any[]>('/auth/addresses', {
+    method: 'POST',
+    body: JSON.stringify(addr),
+  });
+  return result.data || [];
+}
+
+export async function deleteSavedAddress(id: string): Promise<any[]> {
+  const result = await apiFetch<any[]>(`/auth/addresses/${id}`, {
+    method: 'DELETE',
+  });
+  return result.data || [];
+}
+
+export async function fetchFavouriteFarms(): Promise<string[]> {
+  const result = await apiFetch<string[]>('/auth/favourite-farms');
+  return result.data || [];
+}
+
+export async function toggleFavouriteFarmApi(
+  farmId: string
+): Promise<{ favouriteFarms: string[]; isFavourited: boolean }> {
+  const result = await apiFetch<{ favouriteFarms: string[]; isFavourited: boolean }>(
+    '/auth/favourite-farms/toggle',
+    {
+      method: 'POST',
+      body: JSON.stringify({ farmId }),
+    }
+  );
   return result.data;
 }
 

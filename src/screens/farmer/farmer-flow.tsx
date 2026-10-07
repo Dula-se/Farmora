@@ -20,6 +20,7 @@ import { DistrictPriceCompareScreen } from './district-price-compare-screen';
 import { WholesaleRetailScreen } from './wholesale-retail-screen';
 import { FarmerTrustScoreScreen } from './farmer-trust-score-screen';
 import { RescueProduceScreen } from './rescue-produce-screen';
+import { FarmerProfileWizard } from './farmer-profile-wizard';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -32,7 +33,8 @@ export type FarmerScreenView =
   | 'district-price-compare'
   | 'wholesale-retail'
   | 'farmer-trust-score'
-  | 'rescue-produce';
+  | 'rescue-produce'
+  | 'onboarding-wizard';
 
 export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'profile';
 
@@ -63,7 +65,8 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
     currentView === 'district-price-compare' ||
     currentView === 'wholesale-retail' ||
     currentView === 'farmer-trust-score' ||
-    currentView === 'rescue-produce';
+    currentView === 'rescue-produce' ||
+    currentView === 'onboarding-wizard';
 
   return (
     <View style={styles.container}>
@@ -187,12 +190,25 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
               <View style={styles.profileAvatarLarge}>
                 <Text style={{ fontSize: 32 }}>👨‍🌾</Text>
               </View>
-              <Text style={styles.profileName}>Kamal Perera</Text>
-              <Text style={styles.profileFarm}>Ampitiya Organic Valley • Kandy</Text>
+              <Text style={styles.profileName}>Kamal Gunawardana</Text>
+              <Text style={styles.profileFarm}>Govigedara Organic Farm • Nuwara Eliya</Text>
               <View style={styles.verifiedFarmerBadge}>
                 <Text style={styles.verifiedFarmerText}>✓ Certified Verified Farmer</Text>
               </View>
             </View>
+
+            {/* Farm Profile Onboarding Wizard Trigger */}
+            <Pressable
+              style={styles.onboardingBanner}
+              onPress={() => setCurrentView('onboarding-wizard')}>
+              <View style={styles.onboardingLeft}>
+                <Text style={styles.onboardingTitle}>Farm Profile 70% Complete</Text>
+                <Text style={styles.onboardingSub}>
+                  Complete Delivery & Payment preferences to boost buyer trust.
+                </Text>
+              </View>
+              <Text style={styles.onboardingArrow}>→</Text>
+            </Pressable>
 
             {/* Switch to Buyer Preview mode if developer/testing */}
             {onSwitchToBuyerPreview && (
@@ -213,6 +229,14 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
               <Text style={styles.logoutBtnText}>Sign Out of Farm Account</Text>
             </Pressable>
           </SafeAreaView>
+        )}
+
+        {currentView === 'onboarding-wizard' && (
+          <FarmerProfileWizard
+            initialStep="checklist"
+            onClose={() => setCurrentView('profile')}
+            onFinish={() => setCurrentView('profile')}
+          />
         )}
       </View>
 
@@ -500,5 +524,36 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
     fontSize: 13,
     fontWeight: '700',
+  },
+  onboardingBanner: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EDF4EC',
+    borderWidth: 1.5,
+    borderColor: '#386641',
+    borderRadius: 14,
+    padding: 16,
+    marginVertical: 12,
+  },
+  onboardingLeft: {
+    flex: 1,
+    marginRight: 10,
+  },
+  onboardingTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1A2E20',
+  },
+  onboardingSub: {
+    fontSize: 11,
+    color: '#475569',
+    marginTop: 3,
+  },
+  onboardingArrow: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#386641',
   },
 });

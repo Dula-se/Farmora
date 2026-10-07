@@ -21,6 +21,14 @@ import { FarmMapScreen } from './farm-map-screen';
 import { FarmerMatchingFlow } from './farmer-matching-flow';
 import { ProductScannerFlow } from './product-scanner-flow';
 import { CartScreen } from './cart-screen';
+import { BuyerProfileScreen } from './buyer-profile-screen';
+import { EditProfileScreen } from './edit-profile-screen';
+import { SavedAddressesScreen } from './saved-addresses-screen';
+import { AddAddressScreen } from './add-address-screen';
+import { FavouriteFarmsScreen } from './favourite-farms-screen';
+import { SettingsScreen } from './settings-screen';
+import { SecurityScreen } from './security-screen';
+import { FarmerPublicProfileScreen } from './farmer-public-profile-screen';
 
 export type BuyerScreenView =
   | 'home'
@@ -35,7 +43,15 @@ export type BuyerScreenView =
   | 'farm-map'
   | 'farmer-matching'
   | 'product-scanner'
-  | 'cart';
+  | 'cart'
+  | 'profile'
+  | 'edit-profile'
+  | 'saved-addresses'
+  | 'add-address'
+  | 'favourite-farms'
+  | 'settings'
+  | 'security'
+  | 'farmer-public-profile';
 
 export type BuyerTab = 'home' | 'market' | 'farms' | 'wishlist' | 'profile';
 
@@ -48,6 +64,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
   const [activeTab, setActiveTab] = useState<BuyerTab>('home');
   const [selectedCategory, setSelectedCategory] = useState({ id: 'vegetables', name: 'Vegetables' });
   const [selectedProduct, setSelectedProduct] = useState<ApiProduceItem | null>(null);
+  const [selectedFarmer, setSelectedFarmer] = useState<{ id: string; name: string }>({
+    id: 'kamal-gunawardana',
+    name: 'Kamal Gunawardana',
+  });
 
   const handleSelectCategory = (id: string, name: string) => {
     setSelectedCategory({ id, name });
@@ -57,6 +77,11 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
   const handleSelectProduct = (product: ApiProduceItem) => {
     setSelectedProduct(product);
     setCurrentView('product-detail');
+  };
+
+  const handleViewFarm = (farmerId: string, farmerName: string) => {
+    setSelectedFarmer({ id: farmerId, name: farmerName });
+    setCurrentView('farmer-public-profile');
   };
 
   const handleTabPress = (tab: BuyerTab) => {
@@ -69,6 +94,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
       setCurrentView('farm-map');
     } else if (tab === 'wishlist') {
       setCurrentView('wishlist');
+    } else if (tab === 'profile') {
+      setCurrentView('profile');
     }
   };
 
@@ -80,7 +107,11 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     currentView === 'farm-map' ||
     currentView === 'farmer-matching' ||
     currentView === 'product-scanner' ||
-    currentView === 'cart';
+    currentView === 'cart' ||
+    currentView === 'edit-profile' ||
+    currentView === 'add-address' ||
+    currentView === 'security' ||
+    currentView === 'farmer-public-profile';
 
   return (
     <View style={styles.container}>
@@ -218,6 +249,73 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             }}
           />
         )}
+
+        {currentView === 'profile' && (
+          <BuyerProfileScreen
+            onEditProfile={() => setCurrentView('edit-profile')}
+            onOpenSavedAddresses={() => setCurrentView('saved-addresses')}
+            onOpenFavouriteFarms={() => setCurrentView('favourite-farms')}
+            onOpenSettings={() => setCurrentView('settings')}
+            onOpenSecurity={() => setCurrentView('security')}
+            onLogout={onBackToAuth}
+          />
+        )}
+
+        {currentView === 'edit-profile' && (
+          <EditProfileScreen
+            onBack={() => setCurrentView('profile')}
+            onSaved={() => setCurrentView('profile')}
+          />
+        )}
+
+        {currentView === 'saved-addresses' && (
+          <SavedAddressesScreen
+            onBack={() => setCurrentView('profile')}
+            onAddNewAddress={() => setCurrentView('add-address')}
+          />
+        )}
+
+        {currentView === 'add-address' && (
+          <AddAddressScreen
+            onBack={() => setCurrentView('saved-addresses')}
+            onAddressAdded={() => setCurrentView('saved-addresses')}
+          />
+        )}
+
+        {currentView === 'favourite-farms' && (
+          <FavouriteFarmsScreen
+            onBack={() => setCurrentView('profile')}
+            onViewFarm={handleViewFarm}
+          />
+        )}
+
+        {currentView === 'settings' && (
+          <SettingsScreen
+            onBack={() => setCurrentView('profile')}
+            onOpenEditProfile={() => setCurrentView('edit-profile')}
+            onOpenSecurity={() => setCurrentView('security')}
+            onLogout={onBackToAuth}
+          />
+        )}
+
+        {currentView === 'security' && (
+          <SecurityScreen
+            onBack={() => setCurrentView('settings')}
+            onLogout={onBackToAuth}
+          />
+        )}
+
+        {currentView === 'farmer-public-profile' && (
+          <FarmerPublicProfileScreen
+            farmerId={selectedFarmer.id}
+            farmerName={selectedFarmer.name}
+            onBack={() => setCurrentView('favourite-farms')}
+            onSelectProduce={handleSelectProduct}
+            onOpenChat={(f) => {
+              alert(`Chat initiated with farmer ${f.name}`);
+            }}
+          />
+        )}
       </View>
 
       {/* Persistent Bottom Tab Bar (Matching Figma bottom bar) */}
@@ -274,16 +372,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             </Text>
           </Pressable>
 
-          {/* 5. Profile / Auth switcher */}
+          {/* 5. Profile */}
           <Pressable
             style={styles.tabBtn}
-            onPress={() => {
-              if (onBackToAuth) {
-                onBackToAuth();
-              } else {
-                handleTabPress('profile');
-              }
-            }}>
+            onPress={() => handleTabPress('profile')}>
             <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'profile' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <Path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
