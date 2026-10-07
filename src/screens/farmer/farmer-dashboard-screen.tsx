@@ -26,6 +26,7 @@ interface FarmerDashboardScreenProps {
   onOpenWholesaleRetail?: () => void;
   onOpenTrustScore?: () => void;
   onOpenRescueProduce?: () => void;
+  onOpenVerification?: () => void;
 }
 
 interface FarmerOrderSummary {
@@ -73,6 +74,7 @@ export function FarmerDashboardScreen({
   onOpenWholesaleRetail,
   onOpenTrustScore,
   onOpenRescueProduce,
+  onOpenVerification,
 }: FarmerDashboardScreenProps) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [myListings, setMyListings] = useState<ApiProduceItem[]>([]);
@@ -276,6 +278,28 @@ export function FarmerDashboardScreen({
                 <Text style={styles.metricFootnote}>24 verified reviews</Text>
               </View>
             </View>
+
+            {/* Get Verified Hero Banner */}
+            {onOpenVerification && (
+              <Pressable
+                style={styles.verificationBannerCard}
+                onPress={onOpenVerification}>
+                <View style={styles.verificationBannerIcon}>
+                  <Text style={{ fontSize: 20 }}>🛡️</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.verificationBannerTitle}>
+                    Grow Your Trust & Sales
+                  </Text>
+                  <Text style={styles.verificationBannerSub}>
+                    Get verified with NIC & land evidence to unlock badges & up to 3x more orders.
+                  </Text>
+                </View>
+                <View style={styles.verificationBannerBtn}>
+                  <Text style={styles.verificationBannerBtnText}>Verify ›</Text>
+                </View>
+              </Pressable>
+            )}
 
             {/* Quick Actions Bar */}
             <View style={styles.quickActionsSection}>
@@ -1052,6 +1076,49 @@ const styles = StyleSheet.create({
   },
   rescueOpenBtnText: {
     fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  verificationBannerCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    borderRadius: 16,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  verificationBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verificationBannerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#14532D',
+  },
+  verificationBannerSub: {
+    fontSize: 11,
+    color: '#166534',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  verificationBannerBtn: {
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  verificationBannerBtnText: {
+    fontSize: 12,
     fontWeight: '800',
     color: '#FFFFFF',
   },

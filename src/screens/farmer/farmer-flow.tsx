@@ -21,6 +21,9 @@ import { WholesaleRetailScreen } from './wholesale-retail-screen';
 import { FarmerTrustScoreScreen } from './farmer-trust-score-screen';
 import { RescueProduceScreen } from './rescue-produce-screen';
 import { FarmerProfileWizard } from './farmer-profile-wizard';
+import { FarmerPrivacyScreen } from './farmer-privacy-screen';
+import { FarmerVerificationFlow } from './farmer-verification-flow';
+import { FarmerPublicProfileScreen } from '../buyer/farmer-public-profile-screen';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -34,7 +37,10 @@ export type FarmerScreenView =
   | 'wholesale-retail'
   | 'farmer-trust-score'
   | 'rescue-produce'
-  | 'onboarding-wizard';
+  | 'onboarding-wizard'
+  | 'privacy'
+  | 'verification'
+  | 'farmer-public-profile';
 
 export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'profile';
 
@@ -66,7 +72,10 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
     currentView === 'wholesale-retail' ||
     currentView === 'farmer-trust-score' ||
     currentView === 'rescue-produce' ||
-    currentView === 'onboarding-wizard';
+    currentView === 'onboarding-wizard' ||
+    currentView === 'privacy' ||
+    currentView === 'verification' ||
+    currentView === 'farmer-public-profile';
 
   return (
     <View style={styles.container}>
@@ -84,6 +93,7 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
             onOpenWholesaleRetail={() => setCurrentView('wholesale-retail')}
             onOpenTrustScore={() => setCurrentView('farmer-trust-score')}
             onOpenRescueProduce={() => setCurrentView('rescue-produce')}
+            onOpenVerification={() => setCurrentView('verification')}
           />
         )}
 
@@ -186,49 +196,133 @@ export function FarmerFlow({ onBackToAuth, onSwitchToBuyerPreview }: FarmerFlowP
 
         {currentView === 'profile' && (
           <SafeAreaView style={styles.profileContainer}>
-            <View style={styles.profileHeader}>
-              <View style={styles.profileAvatarLarge}>
-                <Text style={{ fontSize: 32 }}>👨‍🌾</Text>
+            <ScrollView
+              contentContainerStyle={styles.profileScrollContent}
+              showsVerticalScrollIndicator={false}>
+              <View style={styles.profileHeader}>
+                <View style={styles.profileAvatarLarge}>
+                  <Text style={{ fontSize: 32 }}>👨‍🌾</Text>
+                </View>
+                <Text style={styles.profileName}>Kamal Gunawardana</Text>
+                <Text style={styles.profileFarm}>Govigedara Organic Farm • Nuwara Eliya</Text>
+                <View style={styles.verifiedFarmerBadge}>
+                  <Text style={styles.verifiedFarmerText}>✓ Certified Verified Farmer</Text>
+                </View>
               </View>
-              <Text style={styles.profileName}>Kamal Gunawardana</Text>
-              <Text style={styles.profileFarm}>Govigedara Organic Farm • Nuwara Eliya</Text>
-              <View style={styles.verifiedFarmerBadge}>
-                <Text style={styles.verifiedFarmerText}>✓ Certified Verified Farmer</Text>
-              </View>
-            </View>
 
-            {/* Farm Profile Onboarding Wizard Trigger */}
-            <Pressable
-              style={styles.onboardingBanner}
-              onPress={() => setCurrentView('onboarding-wizard')}>
-              <View style={styles.onboardingLeft}>
-                <Text style={styles.onboardingTitle}>Farm Profile 70% Complete</Text>
-                <Text style={styles.onboardingSub}>
-                  Complete Delivery & Payment preferences to boost buyer trust.
-                </Text>
-              </View>
-              <Text style={styles.onboardingArrow}>→</Text>
-            </Pressable>
+              {/* Action Buttons List */}
+              <View style={styles.profileMenuSection}>
+                {/* 1. Verification Center */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('verification')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#DCFCE7' }]}>
+                    <Text style={{ fontSize: 18 }}>🛡️</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Get Verified</Text>
+                    <Text style={styles.menuItemSub}>Upload NIC, certifications & land evidence</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
 
-            {/* Switch to Buyer Preview mode if developer/testing */}
-            {onSwitchToBuyerPreview && (
+                {/* 2. Privacy Settings */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('privacy')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#F1F5F9' }]}>
+                    <Text style={{ fontSize: 18 }}>🔒</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Privacy & Security</Text>
+                    <Text style={styles.menuItemSub}>Control visibility, data download & policy</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+
+                {/* 3. View Public Profile */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('farmer-public-profile')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#EFF6FF' }]}>
+                    <Text style={{ fontSize: 18 }}>👁️</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>View Public Profile</Text>
+                    <Text style={styles.menuItemSub}>See how buyers and restaurants view your farm</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+
+                {/* 4. Farm Profile Onboarding Wizard */}
+                <Pressable
+                  style={[styles.profileMenuItem, { borderBottomWidth: 0 }]}
+                  onPress={() => setCurrentView('onboarding-wizard')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#FEF3C7' }]}>
+                    <Text style={{ fontSize: 18 }}>⚙️</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Farm Setup Checklist</Text>
+                    <Text style={styles.menuItemSub}>70% complete — Delivery & payment preferences</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+              </View>
+
+              {/* Switch to Buyer Preview mode if developer/testing */}
+              {onSwitchToBuyerPreview && (
+                <Pressable
+                  style={styles.switchModeCard}
+                  onPress={onSwitchToBuyerPreview}>
+                  <Text style={styles.switchModeTitle}>Switch to Buyer Marketplace View</Text>
+                  <Text style={styles.switchModeSub}>Preview the app from a buyer perspective</Text>
+                </Pressable>
+              )}
+
               <Pressable
-                style={styles.switchModeCard}
-                onPress={onSwitchToBuyerPreview}>
-                <Text style={styles.switchModeTitle}>Switch to Buyer Marketplace View</Text>
-                <Text style={styles.switchModeSub}>Preview the app from a buyer perspective</Text>
+                style={styles.logoutBtn}
+                onPress={async () => {
+                  await clearAuthSession();
+                  onBackToAuth();
+                }}>
+                <Text style={styles.logoutBtnText}>Sign Out of Farm Account</Text>
               </Pressable>
-            )}
-
-            <Pressable
-              style={styles.logoutBtn}
-              onPress={async () => {
-                await clearAuthSession();
-                onBackToAuth();
-              }}>
-              <Text style={styles.logoutBtnText}>Sign Out of Farm Account</Text>
-            </Pressable>
+            </ScrollView>
           </SafeAreaView>
+        )}
+
+        {currentView === 'privacy' && (
+          <FarmerPrivacyScreen
+            onBack={() => {
+              setActiveTab('profile');
+              setCurrentView('profile');
+            }}
+          />
+        )}
+
+        {currentView === 'verification' && (
+          <FarmerVerificationFlow
+            initialStep="landing"
+            onBack={() => {
+              setActiveTab('dashboard');
+              setCurrentView('dashboard');
+            }}
+            onGoToDashboard={() => {
+              setActiveTab('dashboard');
+              setCurrentView('dashboard');
+            }}
+            onViewPublicProfile={() => setCurrentView('farmer-public-profile')}
+          />
+        )}
+
+        {currentView === 'farmer-public-profile' && (
+          <FarmerPublicProfileScreen
+            farmerName="Kamal Gunawardana"
+            onBack={() => {
+              setActiveTab('profile');
+              setCurrentView('profile');
+            }}
+          />
         )}
 
         {currentView === 'onboarding-wizard' && (
@@ -555,5 +649,48 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: '#386641',
+  },
+  profileScrollContent: {
+    width: '100%',
+    alignItems: 'center',
+    paddingBottom: 40,
+  },
+  profileMenuSection: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginVertical: 12,
+    overflow: 'hidden',
+  },
+  profileMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  menuIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  menuItemSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  menuArrow: {
+    fontSize: 20,
+    color: '#94A3B8',
+    fontWeight: '600',
   },
 });
