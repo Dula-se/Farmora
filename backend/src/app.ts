@@ -34,6 +34,30 @@ if (config.nodeEnv !== 'test') {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+import { connectDB } from './config/database.js';
+
+// Ensure DB connection in Serverless environments (cold starts)
+app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await connectDB();
+  } catch (err) {
+    console.warn('[DB Middleware] Connection warning:', err instanceof Error ? err.message : err);
+  }
+  next();
+});
+
+// Root Landing Endpoint (Confirms Vercel deployment status)
+app.get('/', (_req: Request, res: Response) => {
+  return sendSuccess(res, {
+    service: 'Famora API',
+    status: 'online',
+    version: '1.0.0',
+    environment: config.nodeEnv,
+    healthEndpoint: '/api/health',
+    message: 'Famora Farm-to-Market Backend API is operating.',
+  });
+});
+
 // Serve Uploaded Files Statically
 const uploadsPath = path.resolve(process.cwd(), config.upload.uploadDir);
 app.use('/uploads', express.static(uploadsPath));
@@ -66,3 +90,5 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const message = err instanceof Error ? err.message : 'Internal Server Error';
   return sendError(res, message, 500);
 });
+
+export default app;

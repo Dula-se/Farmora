@@ -1,46 +1,56 @@
 import mongoose from 'mongoose';
 import { config } from './env.js';
 
-let isConnected = false;
+let cachedPromise: Promise<typeof mongoose> | null = null;
 
 export async function connectDB(): Promise<void> {
-  if (isConnected) {
-    console.log('[MongoDB] Already connected.');
+  // 1 = connected, 2 = connecting
+  if (mongoose.connection.readyState === 1) {
     return;
   }
 
-  const uri = config.mongo.uri || 'mongodb://127.0.0.1:27017/farmora';
-  console.log(`[MongoDB] Connecting to: ${uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@')} ...`);
+  const isVercel = !!process.env.VERCEL;
+  const isProd = config.nodeEnv === 'production';
+  const uri = config.mongo.uri || (isVercel || isProd ? '' : 'mongodb://127.0.0.1:27017/farmora');
+
+  if (!uri) {
+    console.warn('[MongoDB] ⚠️ MONGODB_URI is not configured in environment variables.');
+    return;
+  }
+
+  if (cachedPromise) {
+    try {
+      await cachedPromise;
+      return;
+    } catch {
+      cachedPromise = null;
+    }
+  }
+
+  const maskedUri = uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
+  console.log(`[MongoDB] Connecting to: ${maskedUri} ...`);
+
+  cachedPromise = mongoose.connect(uri, {
+    dbName: config.mongo.dbName,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
 
   try {
-    await mongoose.connect(uri, {
-      dbName: config.mongo.dbName,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    });
-
-    isConnected = true;
+    await cachedPromise;
     console.log(`[MongoDB] ✅ Connected to database: "${config.mongo.dbName}"`);
-
-    mongoose.connection.on('disconnected', () => {
-      isConnected = false;
-      console.warn('[MongoDB] ⚠️  Disconnected.');
-    });
-
-    mongoose.connection.on('error', (err) => {
-      console.error('[MongoDB] ❌ Connection error:', err.message);
-    });
   } catch (err) {
+    cachedPromise = null;
     const message = err instanceof Error ? err.message : String(err);
-    console.error('[MongoDB] ❌ Failed to connect:', message);
+    console.error('[MongoDB] ❌ Connection error:', message);
     throw err;
   }
 }
 
 export async function disconnectDB(): Promise<void> {
-  if (!isConnected) return;
+  if (mongoose.connection.readyState === 0) return;
   await mongoose.disconnect();
-  isConnected = false;
+  cachedPromise = null;
   console.log('[MongoDB] Disconnected.');
 }
 

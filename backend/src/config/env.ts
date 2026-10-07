@@ -20,7 +20,7 @@ export const config = {
   upload: {
     provider: (process.env.STORAGE_PROVIDER as 'local' | 'cloudinary' | 's3' | 'azure') || 'local',
     maxSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '5', 10),
-    uploadDir: process.env.UPLOAD_DIR || 'uploads',
+    uploadDir: process.env.UPLOAD_DIR || (process.env.VERCEL ? '/tmp/uploads' : 'uploads'),
   },
   azure: {
     connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING || '',

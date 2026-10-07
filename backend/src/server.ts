@@ -52,7 +52,12 @@ async function bootstrap() {
   process.on('SIGINT', shutdown);
 }
 
-bootstrap().catch((err) => {
-  console.error('❌ Failed to start server:', err);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  bootstrap().catch((err) => {
+    console.error('❌ Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
+export default app;
+export { app };
