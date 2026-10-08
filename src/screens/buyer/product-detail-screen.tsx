@@ -399,7 +399,8 @@ export function ProductDetailScreen({
         <View style={styles.qtySelector}>
           <Pressable
             style={[styles.qtyBtn, selectedQty <= minQty && styles.qtyBtnDisabled]}
-            onPress={handleDecrement}>
+            onPress={handleDecrement}
+            hitSlop={8}>
             <Text style={styles.qtyBtnText}>−</Text>
           </Pressable>
           <View style={styles.qtyDisplay}>
@@ -408,7 +409,8 @@ export function ProductDetailScreen({
           </View>
           <Pressable
             style={[styles.qtyBtn, selectedQty >= maxQty && styles.qtyBtnDisabled]}
-            onPress={handleIncrement}>
+            onPress={handleIncrement}
+            hitSlop={8}>
             <Text style={styles.qtyBtnText}>+</Text>
           </Pressable>
         </View>
@@ -416,23 +418,30 @@ export function ProductDetailScreen({
         {/* Add to Cart button */}
         <Pressable
           style={[styles.addToCartDetailBtn, addedToCartToast && styles.addToCartDetailBtnSuccess]}
-          onPress={handleAddToCartPress}>
-          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={addedToCartToast ? '#16A34A' : '#2E7D32'} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+          onPress={handleAddToCartPress}
+          hitSlop={6}
+          accessibilityLabel="Add to cart">
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={addedToCartToast ? '#16A34A' : '#15803D'} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
             <Path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
             <Path d="M3 6h18" />
             <Path d="M16 10a4 4 0 0 1-8 0" />
           </Svg>
           <Text style={[styles.addToCartDetailBtnText, addedToCartToast && styles.addToCartDetailBtnTextSuccess]}>
-            {addedToCartToast ? 'Added!' : '+ Cart'}
+            {addedToCartToast ? 'Added' : 'Cart'}
           </Text>
         </Pressable>
 
+        {/* Order Now button with anti-squeeze badge */}
         <Pressable
           style={styles.orderBtn}
           onPress={() => onOrderNow?.(product, selectedQty)}>
           <View style={styles.orderBtnContent}>
-            <Text style={styles.orderBtnLabel}>Order Now</Text>
-            <Text style={styles.orderBtnPrice}>Rs. {totalPrice.toLocaleString()}</Text>
+            <Text style={styles.orderBtnLabel} numberOfLines={1}>Order Now</Text>
+            <View style={styles.orderBtnPriceBadge}>
+              <Text style={styles.orderBtnPrice} numberOfLines={1}>
+                Rs. {totalPrice.toLocaleString()}
+              </Text>
+            </View>
           </View>
         </Pressable>
       </View>
@@ -876,12 +885,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.06,
@@ -891,14 +900,14 @@ const styles = StyleSheet.create({
   qtySelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    height: 48,
+    height: 44,
   },
   qtyBtn: {
-    width: 38,
+    width: 28,
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
@@ -907,30 +916,32 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   qtyBtnText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1E293B',
   },
   qtyDisplay: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 4,
     alignItems: 'center',
-    minWidth: 50,
+    minWidth: 38,
   },
   qtyValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
     color: '#0F172A',
   },
   qtyUnit: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: '#64748B',
   },
   orderBtn: {
     flex: 1,
+    minWidth: 0,
     backgroundColor: '#2E7D32',
-    height: 48,
-    borderRadius: 12,
+    height: 44,
+    borderRadius: 10,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#2E7D32',
@@ -942,17 +953,27 @@ const styles = StyleSheet.create({
   orderBtnContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 6,
+    width: '100%',
   },
   orderBtnLabel: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '800',
+    flexShrink: 0,
+  },
+  orderBtnPriceBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    flexShrink: 1,
   },
   orderBtnPrice: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   topNavCartBadge: {
     position: 'absolute',
@@ -976,11 +997,11 @@ const styles = StyleSheet.create({
   addToCartDetailBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     backgroundColor: '#DCFCE7',
-    height: 48,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    height: 44,
+    paddingHorizontal: 10,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#BBF7D0',
   },
@@ -988,7 +1009,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#BBF7D0',
   },
   addToCartDetailBtnText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: '#166534',
   },

@@ -96,6 +96,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     id: 'kamal-gunawardana',
     name: 'Kamal Gunawardana',
   });
+  const [rateOriginView, setRateOriginView] = useState<'reviews' | 'farmer-public-profile' | 'buyer-orders'>('farmer-public-profile');
 
   // Communication & Call States
   const [activeChatMeta, setActiveChatMeta] = useState<{
@@ -311,6 +312,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             product={selectedProduct}
             onBack={() => setCurrentView('product-detail')}
             onWriteReview={() => {
+              setRateOriginView('reviews');
               setSelectedFarmer({
                 id: selectedProduct.farmerId || (selectedProduct as any)._id || selectedProduct.id || 'farmer-1',
                 name: selectedProduct.farmerName || 'Farmer',
@@ -461,16 +463,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <RateExperienceScreen
             farmerId={selectedFarmer.id}
             farmerName={selectedFarmer.name}
-            onBack={() => setCurrentView(selectedProduct ? 'reviews' : 'farmer-public-profile')}
-            onSubmitSuccess={() => {
-              if (selectedFarmer?.id) {
-                setCurrentView('farmer-public-profile');
-              } else if (selectedProduct) {
-                setCurrentView('reviews');
-              } else {
-                setCurrentView('home');
-              }
-            }}
+            onBack={() => setCurrentView(rateOriginView)}
+            onSubmitSuccess={() => setCurrentView(rateOriginView)}
           />
         )}
 
@@ -536,6 +530,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
               handleStartChatWithFarmer(farmerId || 'farmer-1', farmerName);
             }}
             onRateOrder={(order) => {
+              setRateOriginView('buyer-orders');
               setSelectedFarmer({ id: order.farmerId, name: order.farmerName });
               setCurrentView('rate-experience');
             }}
@@ -609,6 +604,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
               handleStartChatWithFarmer(f.id, f.name);
             }}
             onRateFarmer={(f) => {
+              setRateOriginView('farmer-public-profile');
               setSelectedFarmer({ id: f.id, name: f.name, avatar: f.avatar });
               setCurrentView('rate-experience');
             }}

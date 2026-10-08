@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -39,8 +40,20 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
     try {
       const u = await getStoredUser();
       setCurrentUser(u);
-      const targetIds = [product.farmerId, (product as any)._id, product.id, targetId].filter(Boolean) as string[];
-      const data = await RatingService.fetchReviewsForTarget(targetIds, product.farmerName);
+      const resolvedName =
+        product.farmerName ||
+        (product as any).farmer?.fullName ||
+        (product as any).farmer?.name ||
+        product.title;
+      const targetIds = [
+        product.farmerId,
+        (product as any)._id,
+        product.id,
+        (product as any).farmer?.id,
+        (product as any).farmer?._id,
+        targetId,
+      ].filter(Boolean) as string[];
+      const data = await RatingService.fetchReviewsForTarget(targetIds, resolvedName);
       setReviews(data);
     } catch (e) {
       console.warn('Failed to load reviews:', e);
@@ -221,7 +234,14 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
 
         {/* Reviews List */}
         <View style={styles.reviewsList}>
-          {filteredReviews.length === 0 ? (
+          {loading ? (
+            <View style={{ padding: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color="#166534" />
+              <Text style={{ fontSize: 13, color: '#64748B', marginTop: 10, fontWeight: '600' }}>
+                Loading verified reviews...
+              </Text>
+            </View>
+          ) : filteredReviews.length === 0 ? (
             <View style={{ padding: 30, alignItems: 'center' }}>
               <Text style={{ fontSize: 32 }}>🌿</Text>
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#64748B', marginTop: 8 }}>
