@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -30,6 +31,22 @@ import { SettingsScreen } from './settings-screen';
 import { SecurityScreen } from './security-screen';
 import { FarmerPublicProfileScreen } from './farmer-public-profile-screen';
 
+// Communication & Tools Screens
+import { BuyerOrdersScreen } from './buyer-orders-screen';
+import { MessagesListScreen } from '../communication/messages-list-screen';
+import { ChatConversationScreen } from '../communication/chat-conversation-screen';
+import { VoiceCallScreen } from '../communication/voice-call-screen';
+import { VideoCallScreen } from '../communication/video-call-screen';
+import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
+import { RateExperienceScreen } from '../communication/rate-experience-screen';
+import { ReportUserScreen } from '../communication/report-user-screen';
+import { NotificationsScreen } from '../communication/notifications-screen';
+import { NotificationPreferencesScreen } from '../communication/notification-preferences-screen';
+import { PriceAlertsScreen } from '../communication/price-alerts-screen';
+import { HelpSupportScreen } from '../communication/help-support-screen';
+import { AgroToolsScreen } from '../communication/agro-tools-screen';
+import { ChatService } from '@/services/chat-service';
+
 export type BuyerScreenView =
   | 'home'
   | 'categories'
@@ -51,9 +68,19 @@ export type BuyerScreenView =
   | 'favourite-farms'
   | 'settings'
   | 'security'
-  | 'farmer-public-profile';
+  | 'farmer-public-profile'
+  | 'buyer-orders'
+  | 'messages'
+  | 'chat-conversation'
+  | 'rate-experience'
+  | 'report-user'
+  | 'notifications'
+  | 'notification-preferences'
+  | 'price-alerts'
+  | 'help-support'
+  | 'agro-tools';
 
-export type BuyerTab = 'home' | 'market' | 'farms' | 'wishlist' | 'profile';
+export type BuyerTab = 'home' | 'market' | 'messages' | 'wishlist' | 'profile';
 
 interface MarketplaceFlowProps {
   onBackToAuth?: () => void;
@@ -67,6 +94,26 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
   const [selectedFarmer, setSelectedFarmer] = useState<{ id: string; name: string }>({
     id: 'kamal-gunawardana',
     name: 'Kamal Gunawardana',
+  });
+
+  // Communication & Call States
+  const [activeChatId, setActiveChatId] = useState<string>('c1');
+  const [activeCall, setActiveCall] = useState<{
+    visible: boolean;
+    name: string;
+    avatar: string;
+    mode: 'audio' | 'video';
+  }>({
+    visible: false,
+    name: 'Kusuma Bandara',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
+    mode: 'audio',
+  });
+
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ name: string; avatar: string }>({
+    name: 'Kusuma Bandara',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
   });
 
   const handleSelectCategory = (id: string, name: string) => {
@@ -84,14 +131,26 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     setCurrentView('farmer-public-profile');
   };
 
+  const handleStartChatWithFarmer = async (farmerName: string, product?: ApiProduceItem) => {
+    const conv = await ChatService.getOrCreateConversation({
+      participantId: `farmer-${farmerName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+      participantName: farmerName,
+      participantRole: 'farmer',
+      productTitle: product?.title,
+      productImage: product?.images?.[0],
+    });
+    setActiveChatId(conv.id);
+    setCurrentView('chat-conversation');
+  };
+
   const handleTabPress = (tab: BuyerTab) => {
     setActiveTab(tab);
     if (tab === 'home') {
       setCurrentView('home');
     } else if (tab === 'market') {
       setCurrentView('categories');
-    } else if (tab === 'farms') {
-      setCurrentView('farm-map');
+    } else if (tab === 'messages') {
+      setCurrentView('messages');
     } else if (tab === 'wishlist') {
       setCurrentView('wishlist');
     } else if (tab === 'profile') {
@@ -99,7 +158,6 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     }
   };
 
-  // Check if current screen is full-page flow (so we hide bottom bar if needed)
   const isFullScreenView =
     currentView === 'product-detail' ||
     currentView === 'reviews' ||
@@ -111,7 +169,16 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     currentView === 'edit-profile' ||
     currentView === 'add-address' ||
     currentView === 'security' ||
-    currentView === 'farmer-public-profile';
+    currentView === 'farmer-public-profile' ||
+    currentView === 'buyer-orders' ||
+    currentView === 'chat-conversation' ||
+    currentView === 'rate-experience' ||
+    currentView === 'report-user' ||
+    currentView === 'notifications' ||
+    currentView === 'notification-preferences' ||
+    currentView === 'price-alerts' ||
+    currentView === 'help-support' ||
+    currentView === 'agro-tools';
 
   return (
     <View style={styles.container}>
@@ -128,6 +195,9 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenProductScanner={() => setCurrentView('product-scanner')}
             onOpenWishlist={() => setCurrentView('wishlist')}
             onOpenCart={() => setCurrentView('cart')}
+            onOpenOrders={() => setCurrentView('buyer-orders')}
+            onOpenChats={() => setCurrentView('messages')}
+            onOpenProfile={() => setCurrentView('profile')}
           />
         )}
 
@@ -161,10 +231,13 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             product={selectedProduct}
             onBack={() => setCurrentView('home')}
             onOrderNow={(prod, qty) => {
-              alert(`Order placed for ${qty} ${prod.unit} of ${prod.title}! Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`);
+              Alert.alert(
+                'Order Placed! 📦',
+                `Your order for ${qty} ${prod.unit} of ${prod.title} has been routed to the farmer. Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`
+              );
             }}
-            onChatFarmer={(fId) => {
-              alert(`Starting direct chat with farmer #${fId}`);
+            onChatFarmer={(fName) => {
+              handleStartChatWithFarmer(fName || 'Kusuma Bandara', selectedProduct);
             }}
             onOpenReviews={() => setCurrentView('reviews')}
             onOpenSimilar={() => setCurrentView('similar-products')}
@@ -179,6 +252,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <ReviewsScreen
             product={selectedProduct}
             onBack={() => setCurrentView('product-detail')}
+            onWriteReview={() => setCurrentView('rate-experience')}
           />
         )}
 
@@ -197,10 +271,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             initialProduct={selectedProduct}
             onBack={() => setCurrentView('product-detail')}
             onSelectProduct={(compItem) => {
-              alert(`Selected ${compItem.title} for ordering`);
+              Alert.alert('Selected', `${compItem.title} selected for comparison.`);
             }}
             onOrderProduct={(compItem) => {
-              alert(`Ordering ${compItem.title} at Rs. ${compItem.pricePerUnit}/${compItem.unit}`);
+              Alert.alert('Order Initiated', `Ordering ${compItem.title} at Rs. ${compItem.pricePerUnit}/${compItem.unit}`);
             }}
           />
         )}
@@ -223,7 +297,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <FarmMapScreen
             onBack={() => setCurrentView('home')}
             onChatFarmer={(phone) => {
-              alert(`Starting chat with farmer at ${phone}`);
+              handleStartChatWithFarmer('Highland Plots Farmer');
             }}
             onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
           />
@@ -233,10 +307,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <FarmerMatchingFlow
             onBack={() => setCurrentView('home')}
             onOrderFarmer={(farmer) => {
-              alert(`Order confirmed with ${farmer.name}!`);
+              Alert.alert('Direct Order', `Procurement contract sent to ${farmer.name}!`);
             }}
             onChatFarmer={(fId) => {
-              alert(`Opening direct chat with ${fId}`);
+              handleStartChatWithFarmer(fId);
             }}
           />
         )}
@@ -250,14 +324,121 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           />
         )}
 
+        {currentView === 'messages' && (
+          <MessagesListScreen
+            onOpenConversation={(cId) => {
+              setActiveChatId(cId);
+              setCurrentView('chat-conversation');
+            }}
+            onStartCall={(name, avatar, mode) => {
+              setActiveCall({ visible: true, name, avatar, mode });
+            }}
+          />
+        )}
+
+        {currentView === 'chat-conversation' && (
+          <ChatConversationScreen
+            conversationId={activeChatId}
+            onBack={() => setCurrentView(activeTab === 'messages' ? 'messages' : 'home')}
+            onStartAudioCall={(name, avatar) => {
+              setActiveCall({ visible: true, name, avatar, mode: 'audio' });
+            }}
+            onStartVideoCall={(name, avatar) => {
+              setActiveCall({ visible: true, name, avatar, mode: 'video' });
+            }}
+            onRequestInspection={() => setShowScheduleModal(true)}
+            onRateUser={(uId, uName, uAvatar) => {
+              setCurrentView('rate-experience');
+            }}
+          />
+        )}
+
+        {currentView === 'rate-experience' && (
+          <RateExperienceScreen
+            farmerId={selectedFarmer.id}
+            farmerName={selectedFarmer.name}
+            onBack={() => setCurrentView(selectedProduct ? 'reviews' : 'home')}
+            onSubmitSuccess={() => setCurrentView(selectedProduct ? 'reviews' : 'home')}
+          />
+        )}
+
+        {currentView === 'report-user' && (
+          <ReportUserScreen
+            targetName={reportTarget.name}
+            targetAvatar={reportTarget.avatar}
+            onBack={() => setCurrentView('home')}
+            onSubmitSuccess={() => setCurrentView('home')}
+          />
+        )}
+
+        {currentView === 'notifications' && (
+          <NotificationsScreen
+            onBack={() => setCurrentView('home')}
+            onOpenPreferences={() => setCurrentView('notification-preferences')}
+            onActionPress={(item) => {
+              if (item.type === 'message') setCurrentView('messages');
+              else if (item.type === 'price') setCurrentView('price-alerts');
+              else Alert.alert('Notification', item.description);
+            }}
+          />
+        )}
+
+        {currentView === 'notification-preferences' && (
+          <NotificationPreferencesScreen onBack={() => setCurrentView('profile')} />
+        )}
+
+        {currentView === 'price-alerts' && (
+          <PriceAlertsScreen onBack={() => setCurrentView('home')} />
+        )}
+
+        {currentView === 'help-support' && (
+          <HelpSupportScreen
+            onBack={() => setCurrentView('profile')}
+            onOpenLiveChat={() => {
+              handleStartChatWithFarmer('Famora Agronomist Support');
+            }}
+          />
+        )}
+
+        {currentView === 'agro-tools' && (
+          <AgroToolsScreen onBack={() => setCurrentView('home')} />
+        )}
+
         {currentView === 'profile' && (
           <BuyerProfileScreen
             onEditProfile={() => setCurrentView('edit-profile')}
             onOpenSavedAddresses={() => setCurrentView('saved-addresses')}
             onOpenFavouriteFarms={() => setCurrentView('favourite-farms')}
-            onOpenSettings={() => setCurrentView('settings')}
+            onOpenOrderHistory={() => setCurrentView('buyer-orders')}
+            onOpenSettings={() => setCurrentView('notification-preferences')}
             onOpenSecurity={() => setCurrentView('security')}
+            onOpenHelpSupport={() => setCurrentView('help-support')}
             onLogout={onBackToAuth}
+          />
+        )}
+
+        {currentView === 'buyer-orders' && (
+          <BuyerOrdersScreen
+            onBack={() => setCurrentView('home')}
+            onChatFarmer={(farmerName) => {
+              handleStartChatWithFarmer(farmerName);
+            }}
+            onRateOrder={(order) => {
+              setSelectedFarmer({ id: order.farmerId, name: order.farmerName });
+              setCurrentView('rate-experience');
+            }}
+            onReportIssue={(order) => {
+              setReportTarget({ name: order.farmerName, avatar: order.farmerAvatar });
+              setCurrentView('report-user');
+            }}
+            onCallFarmer={(farmerName, farmerPhone, avatar) => {
+              setActiveCall({
+                visible: true,
+                name: farmerName,
+                avatar: avatar,
+                mode: 'audio',
+              });
+            }}
           />
         )}
 
@@ -312,13 +493,52 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onBack={() => setCurrentView('favourite-farms')}
             onSelectProduce={handleSelectProduct}
             onOpenChat={(f) => {
-              alert(`Chat initiated with farmer ${f.name}`);
+              handleStartChatWithFarmer(f.name);
             }}
           />
         )}
       </View>
 
-      {/* Persistent Bottom Tab Bar (Matching Figma bottom bar) */}
+      {/* Voice Call Modal */}
+      {activeCall.visible && activeCall.mode === 'audio' && (
+        <VoiceCallScreen
+          visible={activeCall.visible}
+          participantName={activeCall.name}
+          participantAvatar={activeCall.avatar}
+          onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
+          onSwitchToVideo={() =>
+            setActiveCall((prev) => ({ ...prev, mode: 'video' }))
+          }
+        />
+      )}
+
+      {/* Video Call Modal */}
+      {activeCall.visible && activeCall.mode === 'video' && (
+        <VideoCallScreen
+          visible={activeCall.visible}
+          participantName={activeCall.name}
+          participantAvatar={activeCall.avatar}
+          onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
+        />
+      )}
+
+      {/* Schedule Live Video Inspection Modal */}
+      <ScheduleInspectionModal
+        visible={showScheduleModal}
+        farmerName={activeCall.name || 'Kusuma Bandara'}
+        onClose={() => setShowScheduleModal(false)}
+        onScheduled={(details) => {
+          setShowScheduleModal(false);
+          ChatService.sendMessage(activeChatId, {
+            senderId: 'current-user',
+            senderName: 'You',
+            senderRole: 'buyer',
+            text: `📅 Scheduled Live Inspection for ${details.date} at ${details.time} (${details.note})`,
+          });
+        }}
+      />
+
+      {/* Persistent Bottom Tab Bar */}
       {!isFullScreenView && (
         <View style={styles.bottomTabBar}>
           {/* 1. Home */}
@@ -347,16 +567,15 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             </Text>
           </Pressable>
 
-          {/* 3. Farms / Map */}
+          {/* 3. Chats / Messages */}
           <Pressable
             style={styles.tabBtn}
-            onPress={() => handleTabPress('farms')}>
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'farms' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-              <Path d="M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+            onPress={() => handleTabPress('messages')}>
+            <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={activeTab === 'messages' ? '#2E7D32' : '#94A3B8'} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </Svg>
-            <Text style={[styles.tabLabel, activeTab === 'farms' && styles.tabLabelActive]}>
-              Farms
+            <Text style={[styles.tabLabel, activeTab === 'messages' && styles.tabLabelActive]}>
+              Chats
             </Text>
           </Pressable>
 

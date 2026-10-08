@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Platform,
   Pressable,
@@ -9,12 +9,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
+import { ChatService, ReviewItem } from '@/services/chat-service';
 
 interface ReviewsScreenProps {
   product: ApiProduceItem;
   onBack: () => void;
+  onWriteReview?: () => void;
 }
 
 const DEMO_REVIEWS = [
@@ -27,6 +30,7 @@ const DEMO_REVIEWS = [
     comment:
       'Harvest was crisp and sweet. Arrived washed and sorted in ventilated wooden crates. Zero bruising. Perfect for our restaurant kitchen in Colombo.',
     helpful: 14,
+    images: [] as string[],
   },
   {
     id: 'r2',
@@ -37,6 +41,7 @@ const DEMO_REVIEWS = [
     comment:
       'We usually buy from the Pettah market where prices fluctuate wildly. Getting 200kg straight from Welimada plots at guaranteed rates is a game changer.',
     helpful: 9,
+    images: [] as string[],
   },
   {
     id: 'r3',
@@ -47,6 +52,7 @@ const DEMO_REVIEWS = [
     comment:
       'Produce was top tier. Delivery took around 4 hours from highland dispatch to Kandy delivery. Will order on a weekly schedule.',
     helpful: 5,
+    images: [] as string[],
   },
 ];
 
@@ -58,13 +64,27 @@ const RATING_BARS = [
   { stars: 1, percent: 1 },
 ];
 
-export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
+export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenProps) {
   const [activeFilter, setActiveFilter] = useState<'all' | 'photos' | '5star'>('all');
+  const [submittedReviews, setSubmittedReviews] = useState<ReviewItem[]>([]);
   const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({
     r1: 14,
     r2: 9,
     r3: 5,
   });
+
+  useEffect(() => {
+    loadDynamicReviews();
+  }, []);
+
+  const loadDynamicReviews = async () => {
+    try {
+      const revs = await ChatService.getReviews();
+      setSubmittedReviews(revs);
+    } catch (e) {
+      console.log('Failed to load reviews:', e);
+    }
+  };
 
   const toggleHelpful = (id: string) => {
     setHelpfulCounts((prev) => ({
@@ -72,6 +92,30 @@ export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
       [id]: (prev[id] || 0) + 1,
     }));
   };
+
+  // Convert submitted reviews to display format
+  const dynamicFormatted = submittedReviews.map((r) => ({
+    id: r.id,
+    author: r.authorName,
+    date: r.date,
+    rating: r.overallRating,
+    title: r.tags.length > 0 ? r.tags.join(' • ') : 'Verified Harvest Feedback',
+    comment: r.comment,
+    helpful: r.helpfulCount,
+    images: r.images || [],
+  }));
+
+  const allCombined = [...dynamicFormatted, ...DEMO_REVIEWS];
+
+  const filteredReviews = allCombined.filter((rev) => {
+    if (activeFilter === 'photos') {
+      return rev.images && rev.images.length > 0;
+    }
+    if (activeFilter === '5star') {
+      return rev.rating >= 5;
+    }
+    return true;
+  });
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -85,47 +129,76 @@ export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
           </Svg>
         </Pressable>
         <Text style={styles.headerTitle}>Reviews & Ratings</Text>
-        <View style={{ width: 36 }} />
+        {onWriteReview ? (
+          <Pressable
+            onPress={onWriteReview}
+            style={{ backgroundColor: '#1E5E3A', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>+ Rate</Text>
+          </Pressable>
+        ) : (
+          <View style={{ width: 36 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Rating Overview Card */}
+        {/* Write Review CTA Card */}
+        {onWriteReview && (
+          <Pressable
+            style={styles.rateCtaCard}
+            onPress={onWriteReview}>
+            <View>
+              <Text style={styles.rateCtaTitle}>Bought from this farmer?</Text>
+              <Text style={styles.rateCtaSub}>Rate quality, sorting, and dispatch</Text>
+            </View>
+            <View style={styles.rateCtaBtn}>
+              <Text style={styles.rateCtaBtnText}>Write Review ⭐</Text>
+            </View>
+          </Pressable>
+        )}
+
+        {/* Big Rating Summary Card */}
         <View style={styles.ratingOverviewCard}>
           <View style={styles.leftScore}>
             <Text style={styles.bigScore}>4.8</Text>
             <View style={styles.starsRow}>
               <Text style={styles.starsText}>★★★★★</Text>
             </View>
-            <Text style={styles.reviewTotal}>Based on 124 reviews</Text>
+            <Text style={styles.reviewTotal}>{allCombined.length} verified ratings</Text>
           </View>
 
-          {/* Distribution Bars */}
           <View style={styles.barsContainer}>
-            {RATING_BARS.map((bar) => (
-              <View key={bar.stars} style={styles.barRow}>
-                <Text style={styles.barLabel}>{bar.stars} ★</Text>
+            {RATING_BARS.map((b) => (
+              <View key={b.stars} style={styles.barRow}>
+                <Text style={styles.barLabel}>{b.stars}★</Text>
                 <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: `${bar.percent}%` }]} />
+                  <View style={[styles.barFill, { width: `${b.percent}%` }]} />
                 </View>
-                <Text style={styles.barPercent}>{bar.percent}%</Text>
+                <Text style={styles.barPercent}>{b.percent}%</Text>
               </View>
             ))}
           </View>
         </View>
 
-        {/* Feature Sub-Ratings */}
+        {/* Sub-Criteria Breakdown */}
         <View style={styles.subRatingsRow}>
           <View style={styles.subRatingItem}>
-            <Text style={styles.subRatingValue}>4.9</Text>
+            <Text style={styles.subRatingScore}>4.9</Text>
             <Text style={styles.subRatingLabel}>Freshness</Text>
           </View>
+          <View style={styles.subDivider} />
           <View style={styles.subRatingItem}>
-            <Text style={styles.subRatingValue}>4.8</Text>
-            <Text style={styles.subRatingLabel}>Grading / Quality</Text>
+            <Text style={styles.subRatingScore}>4.8</Text>
+            <Text style={styles.subRatingLabel}>Grading</Text>
           </View>
+          <View style={styles.subDivider} />
           <View style={styles.subRatingItem}>
-            <Text style={styles.subRatingValue}>4.7</Text>
-            <Text style={styles.subRatingLabel}>Value for Money</Text>
+            <Text style={styles.subRatingScore}>4.7</Text>
+            <Text style={styles.subRatingLabel}>Packaging</Text>
+          </View>
+          <View style={styles.subDivider} />
+          <View style={styles.subRatingItem}>
+            <Text style={styles.subRatingScore}>4.9</Text>
+            <Text style={styles.subRatingLabel}>Dispatch</Text>
           </View>
         </View>
 
@@ -135,14 +208,14 @@ export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
             style={[styles.filterChip, activeFilter === 'all' && styles.filterChipActive]}
             onPress={() => setActiveFilter('all')}>
             <Text style={[styles.filterChipText, activeFilter === 'all' && styles.filterChipTextActive]}>
-              All (124)
+              All ({allCombined.length})
             </Text>
           </Pressable>
           <Pressable
             style={[styles.filterChip, activeFilter === 'photos' && styles.filterChipActive]}
             onPress={() => setActiveFilter('photos')}>
             <Text style={[styles.filterChipText, activeFilter === 'photos' && styles.filterChipTextActive]}>
-              With Photos (36)
+              With Photos ({allCombined.filter((r) => r.images && r.images.length > 0).length})
             </Text>
           </Pressable>
           <Pressable
@@ -156,7 +229,7 @@ export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
 
         {/* Reviews List */}
         <View style={styles.reviewsList}>
-          {DEMO_REVIEWS.map((rev) => (
+          {filteredReviews.map((rev) => (
             <View key={rev.id} style={styles.reviewCard}>
               <View style={styles.reviewHeader}>
                 <View style={styles.reviewerAvatar}>
@@ -180,12 +253,26 @@ export function ReviewsScreen({ product, onBack }: ReviewsScreenProps) {
               <Text style={styles.reviewTitle}>{rev.title}</Text>
               <Text style={styles.reviewComment}>{rev.comment}</Text>
 
+              {/* Photos if attached (Base64) */}
+              {rev.images && rev.images.length > 0 && (
+                <View style={styles.imagesRow}>
+                  {rev.images.map((imgUri, idx) => (
+                    <Image
+                      key={idx}
+                      source={{ uri: imgUri }}
+                      style={styles.reviewAttachedImg}
+                      contentFit="cover"
+                    />
+                  ))}
+                </View>
+              )}
+
               <View style={styles.reviewFooter}>
                 <Pressable
                   style={styles.helpfulBtn}
                   onPress={() => toggleHelpful(rev.id)}>
                   <Text style={styles.helpfulText}>
-                    👍 Helpful ({helpfulCounts[rev.id] || 0})
+                    👍 Helpful ({helpfulCounts[rev.id] || rev.helpful || 0})
                   </Text>
                 </Pressable>
               </View>
@@ -229,6 +316,37 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
     paddingBottom: 40,
+  },
+  rateCtaCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  rateCtaTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  rateCtaSub: {
+    fontSize: 12,
+    color: '#15803D',
+    marginTop: 2,
+  },
+  rateCtaBtn: {
+    backgroundColor: '#1E5E3A',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  rateCtaBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   ratingOverviewCard: {
     flexDirection: 'row',
@@ -315,40 +433,49 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
-  subRatingValue: {
-    fontSize: 16,
+  subRatingScore: {
+    fontSize: 14,
     fontWeight: '800',
-    color: '#166534',
+    color: '#0F172A',
   },
   subRatingLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#64748B',
     marginTop: 2,
+  },
+  subDivider: {
+    width: 1,
+    backgroundColor: '#F1F5F9',
+    height: '80%',
+    alignSelf: 'center',
   },
   filterChipsRow: {
     flexDirection: 'row',
     gap: 8,
   },
   filterChip: {
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   filterChipActive: {
-    backgroundColor: '#386641',
+    backgroundColor: '#1E5E3A',
+    borderColor: '#1E5E3A',
   },
   filterChipText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#475569',
+    color: '#64748B',
   },
   filterChipTextActive: {
     color: '#FFFFFF',
     fontWeight: '700',
   },
   reviewsList: {
-    gap: 12,
+    gap: 14,
   },
   reviewCard: {
     backgroundColor: '#FFFFFF',
@@ -356,11 +483,6 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: '#E8ECE8',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 4,
-    elevation: 1,
     gap: 8,
   },
   reviewHeader: {
@@ -369,9 +491,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   reviewerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#DCFCE7',
     justifyContent: 'center',
     alignItems: 'center',
@@ -379,7 +501,7 @@ const styles = StyleSheet.create({
   avatarEmoji: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#166534',
+    color: '#15803D',
   },
   authorRow: {
     flexDirection: 'row',
@@ -387,62 +509,73 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   authorName: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
   },
   buyerVerifiedBadge: {
     backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
     paddingVertical: 1,
-    paddingHorizontal: 5,
     borderRadius: 4,
   },
   buyerVerifiedText: {
     fontSize: 9,
-    color: '#166534',
     fontWeight: '700',
+    color: '#15803D',
   },
   reviewDate: {
     fontSize: 11,
     color: '#94A3B8',
-    marginTop: 1,
   },
   starsPill: {
     backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
     paddingVertical: 3,
-    paddingHorizontal: 6,
-    borderRadius: 6,
+    borderRadius: 8,
   },
   starsPillText: {
     fontSize: 11,
     color: '#D97706',
+    fontWeight: '700',
   },
   reviewTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: '#0F172A',
-    marginTop: 2,
   },
   reviewComment: {
     fontSize: 13,
     color: '#475569',
-    lineHeight: 19,
+    lineHeight: 18,
+  },
+  imagesRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  reviewAttachedImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
   },
   reviewFooter: {
     flexDirection: 'row',
+    justifyContent: 'flex-start',
     marginTop: 4,
   },
   helpfulBtn: {
     backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    paddingVertical: 4,
     paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
   helpfulText: {
     fontSize: 11,
-    fontWeight: '600',
     color: '#64748B',
+    fontWeight: '600',
   },
 });

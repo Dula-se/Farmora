@@ -25,6 +25,22 @@ import { FarmerPrivacyScreen } from './farmer-privacy-screen';
 import { FarmerVerificationFlow } from './farmer-verification-flow';
 import { FarmerPublicProfileScreen } from '../buyer/farmer-public-profile-screen';
 
+// Orders & Communication screens
+import { FarmerOrdersScreen } from './farmer-orders-screen';
+import { MessagesListScreen } from '../communication/messages-list-screen';
+import { ChatConversationScreen } from '../communication/chat-conversation-screen';
+import { VoiceCallScreen } from '../communication/voice-call-screen';
+import { VideoCallScreen } from '../communication/video-call-screen';
+import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
+import { RateBuyerScreen } from '../communication/rate-buyer-screen';
+import { ReportUserScreen } from '../communication/report-user-screen';
+import { NotificationsScreen } from '../communication/notifications-screen';
+import { NotificationPreferencesScreen } from '../communication/notification-preferences-screen';
+import { PriceAlertsScreen } from '../communication/price-alerts-screen';
+import { HelpSupportScreen } from '../communication/help-support-screen';
+import { AgroToolsScreen } from '../communication/agro-tools-screen';
+import { ChatService } from '@/services/chat-service';
+
 export type FarmerScreenView =
   | 'dashboard'
   | 'products'
@@ -40,7 +56,15 @@ export type FarmerScreenView =
   | 'onboarding-wizard'
   | 'privacy'
   | 'verification'
-  | 'farmer-public-profile';
+  | 'farmer-public-profile'
+  | 'chat-conversation'
+  | 'rate-buyer'
+  | 'report-user'
+  | 'notifications'
+  | 'notification-preferences'
+  | 'price-alerts'
+  | 'help-support'
+  | 'agro-tools';
 
 export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'profile';
 
@@ -53,6 +77,29 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
   const [activeTab, setActiveTab] = useState<FarmerTab>('dashboard');
   const [newlyAddedTitle, setNewlyAddedTitle] = useState<string | null>(null);
 
+  // Communication & Call States
+  const [activeChatId, setActiveChatId] = useState<string>('c1');
+  const [activeBuyerForRating, setActiveBuyerForRating] = useState({
+    id: 'buyer-sunil',
+    name: 'Sunil Dissanayake',
+  });
+  const [activeCall, setActiveCall] = useState<{
+    visible: boolean;
+    name: string;
+    avatar: string;
+    mode: 'audio' | 'video';
+  }>({
+    visible: false,
+    name: 'Sunil Dissanayake',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+    mode: 'audio',
+  });
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [reportTarget, setReportTarget] = useState({
+    name: 'Sunil Dissanayake',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+  });
+
   const handleTabPress = (tab: FarmerTab) => {
     setActiveTab(tab);
     setCurrentView(tab);
@@ -62,6 +109,17 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     setNewlyAddedTitle(title);
     setActiveTab('products');
     setCurrentView('products');
+  };
+
+  const handleStartChatWithBuyer = async (buyerName: string) => {
+    const conv = await ChatService.getOrCreateConversation({
+      participantId: `buyer-${buyerName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+      participantName: buyerName,
+      participantRole: 'buyer',
+      productTitle: 'Highland Farm Harvest',
+    });
+    setActiveChatId(conv.id);
+    setCurrentView('chat-conversation');
   };
 
   const isFullScreen =
@@ -74,7 +132,15 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     currentView === 'onboarding-wizard' ||
     currentView === 'privacy' ||
     currentView === 'verification' ||
-    currentView === 'farmer-public-profile';
+    currentView === 'farmer-public-profile' ||
+    currentView === 'chat-conversation' ||
+    currentView === 'rate-buyer' ||
+    currentView === 'report-user' ||
+    currentView === 'notifications' ||
+    currentView === 'notification-preferences' ||
+    currentView === 'price-alerts' ||
+    currentView === 'help-support' ||
+    currentView === 'agro-tools';
 
   return (
     <View style={styles.container}>
@@ -130,67 +196,117 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           <RescueProduceScreen onBack={() => setCurrentView('dashboard')} />
         )}
 
+        {/* Real Interactive Orders Screen */}
         {currentView === 'orders' && (
-          <SafeAreaView style={styles.placeholderContainer}>
-            <Text style={styles.placeholderTitle}>Orders & Dispatch</Text>
-            <Text style={styles.placeholderSub}>
-              Manage upcoming collections, bulk delivery dispatch schedules, and buyer payments.
-            </Text>
-            <View style={styles.mockOrderCard}>
-              <Text style={styles.mockOrderTitle}>Order #1042 — Sunil Dissanayake</Text>
-              <Text style={styles.mockOrderCrop}>50 kg Organic Red Tomatoes • Rs. 12,000</Text>
-              <View style={styles.mockBadgeRow}>
-                <View style={styles.mockBadgePending}>
-                  <Text style={styles.mockBadgePendingText}>Pending Dispatch</Text>
-                </View>
-                <Pressable
-                  style={styles.mockConfirmBtn}
-                  onPress={() => alert('Order dispatched! Buyer notified via Twilio SMS.')}>
-                  <Text style={styles.mockConfirmBtnText}>Mark Dispatched</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            <View style={styles.mockOrderCard}>
-              <Text style={styles.mockOrderTitle}>Order #1041 — Green Leaf Supermarket</Text>
-              <Text style={styles.mockOrderCrop}>100 kg Highland Carrots • Rs. 24,000</Text>
-              <View style={styles.mockBadgeRow}>
-                <View style={styles.mockBadgeAccepted}>
-                  <Text style={styles.mockBadgeAcceptedText}>Accepted by Farm</Text>
-                </View>
-              </View>
-            </View>
-          </SafeAreaView>
+          <FarmerOrdersScreen
+            onChatBuyer={(buyerName) => {
+              handleStartChatWithBuyer(buyerName);
+            }}
+            onRateBuyer={(buyerName, buyerId) => {
+              setActiveBuyerForRating({ id: buyerId, name: buyerName });
+              setCurrentView('rate-buyer');
+            }}
+            onCallBuyer={(buyerName, buyerPhone) => {
+              setActiveCall({
+                visible: true,
+                name: buyerName,
+                avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+                mode: 'audio',
+              });
+            }}
+          />
         )}
 
+        {/* Real Messages List Screen */}
         {currentView === 'messages' && (
-          <SafeAreaView style={styles.placeholderContainer}>
-            <Text style={styles.placeholderTitle}>Buyer Messages</Text>
-            <Text style={styles.placeholderSub}>
-              Direct negotiation and order inquiry chats with verified commercial buyers.
-            </Text>
-            <View style={styles.chatCard}>
-              <View style={styles.chatAvatar}>
-                <Text style={{ fontSize: 18 }}>👨‍💼</Text>
-              </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.chatName}>Sunil Dissanayake</Text>
-                <Text style={styles.chatLastMsg}>Can you dispatch the tomatoes before 10 AM?</Text>
-              </View>
-              <Text style={styles.chatTime}>10m</Text>
-            </View>
+          <MessagesListScreen
+            onOpenConversation={(convId: string) => {
+              setActiveChatId(convId);
+              setCurrentView('chat-conversation');
+            }}
+            onStartCall={(name, avatar, mode) => {
+              setActiveCall({
+                visible: true,
+                name,
+                avatar,
+                mode,
+              });
+            }}
+          />
+        )}
 
-            <View style={styles.chatCard}>
-              <View style={styles.chatAvatar}>
-                <Text style={{ fontSize: 18 }}>🏬</Text>
-              </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.chatName}>Green Leaf Supermarket</Text>
-                <Text style={styles.chatLastMsg}>Invoice received. Transferring to commercial account.</Text>
-              </View>
-              <Text style={styles.chatTime}>2h</Text>
-            </View>
-          </SafeAreaView>
+        {/* 1-on-1 Chat Screen with Negotiation Cards & Base64 Photos */}
+        {currentView === 'chat-conversation' && (
+          <ChatConversationScreen
+            conversationId={activeChatId}
+            currentRole="farmer"
+            onBack={() => setCurrentView('messages')}
+            onStartAudioCall={(name, avatar) => {
+              setActiveCall({ visible: true, name, avatar, mode: 'audio' });
+            }}
+            onStartVideoCall={(name, avatar) => {
+              setActiveCall({ visible: true, name, avatar, mode: 'video' });
+            }}
+            onRequestInspection={() => setShowScheduleModal(true)}
+            onRateUser={(uId, uName) => {
+              setActiveBuyerForRating({ id: uId, name: uName });
+              setCurrentView('rate-buyer');
+            }}
+          />
+        )}
+
+        {/* Rate Buyer Screen */}
+        {currentView === 'rate-buyer' && (
+          <RateBuyerScreen
+            buyerId={activeBuyerForRating.id}
+            buyerName={activeBuyerForRating.name}
+            onBack={() => setCurrentView('orders')}
+            onSubmitSuccess={() => setCurrentView('orders')}
+          />
+        )}
+
+        {/* Report / Dispute User Screen */}
+        {currentView === 'report-user' && (
+          <ReportUserScreen
+            targetName={reportTarget.name}
+            targetAvatar={reportTarget.avatar}
+            onBack={() => setCurrentView('dashboard')}
+            onSubmitSuccess={() => setCurrentView('dashboard')}
+          />
+        )}
+
+        {/* Notifications Screen */}
+        {currentView === 'notifications' && (
+          <NotificationsScreen
+            onBack={() => setCurrentView('dashboard')}
+            onOpenPreferences={() => setCurrentView('notification-preferences')}
+            onActionPress={(item) => {
+              if (item.type === 'message') setCurrentView('messages');
+              else if (item.type === 'price') setCurrentView('price-alerts');
+              else Alert.alert('Notification', item.description);
+            }}
+          />
+        )}
+
+        {currentView === 'notification-preferences' && (
+          <NotificationPreferencesScreen onBack={() => setCurrentView('profile')} />
+        )}
+
+        {currentView === 'price-alerts' && (
+          <PriceAlertsScreen onBack={() => setCurrentView('dashboard')} />
+        )}
+
+        {currentView === 'help-support' && (
+          <HelpSupportScreen
+            onBack={() => setCurrentView('profile')}
+            onOpenLiveChat={() => {
+              handleStartChatWithBuyer('Famora Agro Support');
+            }}
+          />
+        )}
+
+        {currentView === 'agro-tools' && (
+          <AgroToolsScreen onBack={() => setCurrentView('dashboard')} />
         )}
 
         {currentView === 'profile' && (
@@ -225,7 +341,49 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
                   <Text style={styles.menuArrow}>›</Text>
                 </Pressable>
 
-                {/* 2. Privacy Settings */}
+                {/* 2. Agro Tools, Subsidies & Weather */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('agro-tools')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#DCFCE7' }]}>
+                    <Text style={{ fontSize: 18 }}>🌾</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Agro Tools & Subsidies</Text>
+                    <Text style={styles.menuItemSub}>Weather, calendar, subsidies, eco footprint</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+
+                {/* 3. Price Alerts */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('price-alerts')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#FEF3C7' }]}>
+                    <Text style={{ fontSize: 18 }}>📈</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Price Watch & Alerts</Text>
+                    <Text style={styles.menuItemSub}>Manning & Dambulla wholesale index</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+
+                {/* 4. Help & Support */}
+                <Pressable
+                  style={styles.profileMenuItem}
+                  onPress={() => setCurrentView('help-support')}>
+                  <View style={[styles.menuIconBox, { backgroundColor: '#EFF6FF' }]}>
+                    <Text style={{ fontSize: 18 }}>📞</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.menuItemTitle}>Help & 24/7 Hotline</Text>
+                    <Text style={styles.menuItemSub}>Direct agronomy hotline & FAQs</Text>
+                  </View>
+                  <Text style={styles.menuArrow}>›</Text>
+                </Pressable>
+
+                {/* 5. Privacy Settings */}
                 <Pressable
                   style={styles.profileMenuItem}
                   onPress={() => setCurrentView('privacy')}>
@@ -239,7 +397,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
                   <Text style={styles.menuArrow}>›</Text>
                 </Pressable>
 
-                {/* 3. View Public Profile */}
+                {/* 6. View Public Profile */}
                 <Pressable
                   style={styles.profileMenuItem}
                   onPress={() => setCurrentView('farmer-public-profile')}>
@@ -253,7 +411,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
                   <Text style={styles.menuArrow}>›</Text>
                 </Pressable>
 
-                {/* 4. Farm Profile Onboarding Wizard */}
+                {/* 7. Farm Profile Onboarding Wizard */}
                 <Pressable
                   style={[styles.profileMenuItem, { borderBottomWidth: 0 }]}
                   onPress={() => setCurrentView('onboarding-wizard')}>
@@ -262,7 +420,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
                   </View>
                   <View style={{ flex: 1, marginLeft: 12 }}>
                     <Text style={styles.menuItemTitle}>Farm Setup Checklist</Text>
-                    <Text style={styles.menuItemSub}>70% complete — Delivery & payment preferences</Text>
+                    <Text style={styles.menuItemSub}>Delivery & payment preferences</Text>
                   </View>
                   <Text style={styles.menuArrow}>›</Text>
                 </Pressable>
@@ -323,7 +481,46 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         )}
       </View>
 
-      {/* Persistent Bottom Tab Bar (Matching Figma bottom bar) */}
+      {/* Voice Call Modal */}
+      {activeCall.visible && activeCall.mode === 'audio' && (
+        <VoiceCallScreen
+          visible={activeCall.visible}
+          participantName={activeCall.name}
+          participantAvatar={activeCall.avatar}
+          onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
+          onSwitchToVideo={() =>
+            setActiveCall((prev) => ({ ...prev, mode: 'video' }))
+          }
+        />
+      )}
+
+      {/* Video Call Modal */}
+      {activeCall.visible && activeCall.mode === 'video' && (
+        <VideoCallScreen
+          visible={activeCall.visible}
+          participantName={activeCall.name}
+          participantAvatar={activeCall.avatar}
+          onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
+        />
+      )}
+
+      {/* Schedule Live Video Inspection Modal */}
+      <ScheduleInspectionModal
+        visible={showScheduleModal}
+        farmerName="Sunil Dissanayake"
+        onClose={() => setShowScheduleModal(false)}
+        onScheduled={(details) => {
+          setShowScheduleModal(false);
+          ChatService.sendMessage(activeChatId, {
+            senderId: 'current-farmer',
+            senderName: 'You',
+            senderRole: 'farmer',
+            text: `📅 Scheduled Farm Inspection confirmed for ${details.date} at ${details.time}`,
+          });
+        }}
+      />
+
+      {/* Persistent Bottom Tab Bar */}
       {!isFullScreen && (
         <View style={styles.bottomTabBar}>
           {/* 1. Dashboard */}
@@ -432,226 +629,61 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
     fontWeight: '800',
   },
-  placeholderContainer: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#FFFFFF',
-  },
-  placeholderTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 6,
-  },
-  placeholderSub: {
-    fontSize: 13,
-    color: '#64748B',
-    lineHeight: 18,
-    marginBottom: 20,
-  },
-  mockOrderCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-  },
-  mockOrderTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  mockOrderCrop: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 2,
-    marginBottom: 10,
-  },
-  mockBadgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  mockBadgePending: {
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  mockBadgePendingText: {
-    color: '#B45309',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  mockBadgeAccepted: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  mockBadgeAcceptedText: {
-    color: '#15803D',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  mockConfirmBtn: {
-    backgroundColor: '#2E7D32',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  mockConfirmBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  chatCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  chatAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F1F5F9',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chatName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  chatLastMsg: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  chatTime: {
-    fontSize: 11,
-    color: '#94A3B8',
-  },
   profileContainer: {
     flex: 1,
-    padding: 24,
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FAFBF9',
+  },
+  profileScrollContent: {
+    padding: 20,
+    paddingBottom: 40,
   },
   profileHeader: {
     alignItems: 'center',
-    marginVertical: 20,
+    paddingVertical: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E8ECE8',
+    marginBottom: 20,
   },
   profileAvatarLarge: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: '#DCFCE7',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    marginBottom: 10,
   },
   profileName: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     color: '#0F172A',
   },
   profileFarm: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#64748B',
     marginTop: 2,
   },
   verifiedFarmerBadge: {
+    marginTop: 8,
     backgroundColor: '#DCFCE7',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 8,
+    borderRadius: 12,
   },
   verifiedFarmerText: {
+    fontSize: 11,
+    fontWeight: '700',
     color: '#15803D',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  switchModeCard: {
-    width: '100%',
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    marginVertical: 16,
-  },
-  switchModeTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#166534',
-  },
-  switchModeSub: {
-    fontSize: 11,
-    color: '#15803D',
-    marginTop: 2,
-  },
-  logoutBtn: {
-    marginTop: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    backgroundColor: '#FEE2E2',
-  },
-  logoutBtnText: {
-    color: '#B91C1C',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  onboardingBanner: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#EDF4EC',
-    borderWidth: 1.5,
-    borderColor: '#386641',
-    borderRadius: 14,
-    padding: 16,
-    marginVertical: 12,
-  },
-  onboardingLeft: {
-    flex: 1,
-    marginRight: 10,
-  },
-  onboardingTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#1A2E20',
-  },
-  onboardingSub: {
-    fontSize: 11,
-    color: '#475569',
-    marginTop: 3,
-  },
-  onboardingArrow: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#386641',
-  },
-  profileScrollContent: {
-    width: '100%',
-    alignItems: 'center',
-    paddingBottom: 40,
   },
   profileMenuSection: {
-    width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginVertical: 12,
+    borderColor: '#E8ECE8',
     overflow: 'hidden',
+    marginBottom: 20,
   },
   profileMenuItem: {
     flexDirection: 'row',
@@ -661,8 +693,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   menuIconBox: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -675,11 +707,22 @@ const styles = StyleSheet.create({
   menuItemSub: {
     fontSize: 11,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 1,
   },
   menuArrow: {
-    fontSize: 20,
-    color: '#94A3B8',
+    fontSize: 18,
+    color: '#CBD5E1',
     fontWeight: '600',
+  },
+  logoutBtn: {
+    backgroundColor: '#FEE2E2',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  logoutBtnText: {
+    color: '#B91C1C',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
