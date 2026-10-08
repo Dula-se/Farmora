@@ -51,7 +51,12 @@ export interface FirestoreMessage {
   senderRole: 'farmer' | 'buyer';
   text: string;
   timestamp: string;          // ISO string or formatted time
+  rawTimestamp?: string | null; // ISO string for 24-hour edit calculation
   isRead: boolean;
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
   imageUri?: string;          // base64 data URL or https download URL
   isVoiceNote?: boolean;
   voiceDuration?: string;     // "0:18"
@@ -340,7 +345,12 @@ export const FirestoreChatService = {
             senderRole: data.senderRole,
             text: data.text || '',
             timestamp: tsToString(data.timestamp),
+            rawTimestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate().toISOString() : data.createdAt || (typeof data.timestamp === 'string' ? data.timestamp : null),
             isRead: data.isRead ?? false,
+            isEdited: data.isEdited ?? false,
+            editedAt: data.editedAt,
+            isDeleted: data.isDeleted ?? false,
+            deletedAt: data.deletedAt,
             imageUri: data.imageUri,
             isVoiceNote: data.isVoiceNote,
             voiceDuration: data.voiceDuration,
@@ -378,7 +388,10 @@ export const FirestoreChatService = {
       senderRole: myRole,
       text: params.text || '',
       timestamp: serverTimestamp(),
+      createdAt: new Date().toISOString(),
       isRead: false,
+      isEdited: false,
+      isDeleted: false,
     };
 
     if (params.imageUri) msgData.imageUri = params.imageUri;
@@ -514,10 +527,105 @@ export const FirestoreChatService = {
     await updateDoc(msgRef, { 'offer.status': status });
   },
 
+  // ── Edit & Delete Messages ────────────────────────────────────────────────
+
+  /**
+   * Edit a sent text message within 24 hours.
+   */
+  async editMessage(params: {
+    conversationId: string;
+    messageId: string;
+    newText: string;
+    rawTimestamp?: string | null;
+  }): Promise<{ success: boolean; error?: string }> {
+    // 24-hour validation check
+    if (params.rawTimestamp) {
+      const msgDate = new Date(params.rawTimestamp).getTime();
+      if (!isNaN(msgDate)) {
+        const diffHours = (Date.now() - msgDate) / (1000 * 60 * 60);
+        if (diffHours > 24) {
+          return {
+            success: false,
+            error: 'Messages older than 24 hours cannot be edited.',
+          };
+        }
+      }
+    }
+
+    const trimmed = params.newText.trim();
+    if (!trimmed) {
+      return { success: false, error: 'Message content cannot be empty.' };
+    }
+
+    try {
+      const msgRef = doc(db, 'conversations', params.conversationId, 'messages', params.messageId);
+      await updateDoc(msgRef, {
+        text: trimmed,
+        isEdited: true,
+        editedAt: new Date().toISOString(),
+      });
+
+      // Update conversation lastMessage
+      const convRef = doc(db, 'conversations', params.conversationId);
+      await setDoc(
+        convRef,
+        {
+          lastMessage: trimmed,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      ).catch(() => {});
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Firestore] editMessage error:', err);
+      return { success: false, error: err?.message || 'Could not update message.' };
+    }
+  },
+
+  /**
+   * Delete a message for everyone.
+   * Marks message as deleted so both parties see "🚫 This message was deleted".
+   */
+  async deleteMessage(params: {
+    conversationId: string;
+    messageId: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const msgRef = doc(db, 'conversations', params.conversationId, 'messages', params.messageId);
+      await updateDoc(msgRef, {
+        isDeleted: true,
+        deletedAt: new Date().toISOString(),
+        text: 'This message was deleted',
+        imageUri: null,
+        voiceUrl: null,
+        voiceBase64: null,
+      });
+
+      // Update conversation lastMessage
+      const convRef = doc(db, 'conversations', params.conversationId);
+      await setDoc(
+        convRef,
+        {
+          lastMessage: '🚫 This message was deleted',
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      ).catch(() => {});
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Firestore] deleteMessage error:', err);
+      return { success: false, error: err?.message || 'Could not delete message.' };
+    }
+  },
+
   // ── Read receipts ──────────────────────────────────────────────────────────
 
   async markConversationRead(conversationId: string, userId: string): Promise<void> {
-    const convRef = doc(db, 'conversations', conversationId);
-    await updateDoc(convRef, { [`unreadCounts.${userId}`]: 0 });
+    try {
+      const convRef = doc(db, 'conversations', conversationId);
+      await updateDoc(convRef, { [`unreadCounts.${userId}`]: 0 });
+    } catch {}
   },
 };

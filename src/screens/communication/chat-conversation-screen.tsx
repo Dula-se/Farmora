@@ -95,6 +95,13 @@ export function ChatConversationScreen({
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showActionSheet, setShowActionSheet] = useState(false);
 
+  // Edit & Delete message actions
+  const [selectedMsgForAction, setSelectedMsgForAction] = useState<FirestoreMessage | null>(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingMsg, setEditingMsg] = useState<FirestoreMessage | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [updatingMsg, setUpdatingMsg] = useState(false);
+
   // Voice recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -541,6 +548,106 @@ export function ChatConversationScreen({
     handleSendText('Sorry, I cannot accept this offer.');
   };
 
+  // ── Edit & Delete message handlers ────────────────────────────────────────
+
+  const handleLongPressMessage = (msg: FirestoreMessage) => {
+    if (msg.isDeleted) return;
+    const currentMyId = currentUser?.id || currentUser?._id || '';
+    if (msg.senderId !== currentMyId) {
+      Alert.alert('Notice', 'You can only edit or delete messages sent by you.');
+      return;
+    }
+    setSelectedMsgForAction(msg);
+  };
+
+  const handleTriggerEdit = () => {
+    if (!selectedMsgForAction) return;
+    const msg = selectedMsgForAction;
+    setSelectedMsgForAction(null);
+
+    if (msg.isVoiceNote) {
+      Alert.alert('Cannot Edit Voice Note', 'Voice notes cannot be edited. You can delete the message and send a new one.');
+      return;
+    }
+    if (msg.offer) {
+      Alert.alert('Cannot Edit Offer', 'Price offers cannot be modified directly. You can make a counter offer instead.');
+      return;
+    }
+
+    // 24-hour validation check
+    const rawTime = msg.rawTimestamp;
+    if (rawTime) {
+      const msgTime = new Date(rawTime).getTime();
+      if (!isNaN(msgTime)) {
+        const diffHours = (Date.now() - msgTime) / (1000 * 60 * 60);
+        if (diffHours > 24) {
+          Alert.alert(
+            'Cannot Edit Message',
+            'Messages older than 24 hours cannot be edited. Only messages sent within the last 24 hours can be updated.'
+          );
+          return;
+        }
+      }
+    }
+
+    setEditingMsg(msg);
+    setEditingText(msg.text || '');
+    setEditModalVisible(true);
+  };
+
+  const handleTriggerDelete = () => {
+    if (!selectedMsgForAction) return;
+    const msg = selectedMsgForAction;
+    setSelectedMsgForAction(null);
+
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message? It will be removed for everyone in this chat.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete for Everyone',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await FirestoreChatService.deleteMessage({
+              conversationId,
+              messageId: msg.id,
+            });
+            if (!res.success) {
+              Alert.alert('Error', res.error || 'Could not delete message.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSaveEditedMessage = async () => {
+    if (!editingMsg) return;
+    const trimmed = editingText.trim();
+    if (!trimmed) {
+      Alert.alert('Validation Error', 'Message text cannot be empty.');
+      return;
+    }
+
+    setUpdatingMsg(true);
+    const res = await FirestoreChatService.editMessage({
+      conversationId,
+      messageId: editingMsg.id,
+      newText: trimmed,
+      rawTimestamp: editingMsg.rawTimestamp,
+    });
+    setUpdatingMsg(false);
+
+    if (!res.success) {
+      Alert.alert('Validation Error', res.error || 'Could not update message.');
+    } else {
+      setEditModalVisible(false);
+      setEditingMsg(null);
+      setEditingText('');
+    }
+  };
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   const myId = currentUser?.id || currentUser?._id || '';
@@ -684,115 +791,132 @@ export function ChatConversationScreen({
                     )
                   )}
 
-                  <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
-
-                    {/* Photo */}
-                    {item.imageUri && item.imageUri !== '📷 Photo' && (
-                      <View style={styles.imgWrap}>
-                        <Image source={{ uri: item.imageUri }} style={styles.imgAttach} contentFit="cover" />
-                      </View>
-                    )}
-
-                    {/* Voice note */}
-                    {item.isVoiceNote && (
-                      <Pressable style={styles.voiceRow} onPress={() => handlePlayVoice(item)}>
-                        <View style={[styles.playCircle, isMe && styles.playCircleMe]}>
-                          {isPlayingThis ? (
-                            <View style={styles.pauseIcon}>
-                              <View style={styles.pauseBar} />
-                              <View style={styles.pauseBar} />
-                            </View>
-                          ) : (
-                            <Text style={{ fontSize: 11, color: '#FFF' }}>▶</Text>
-                          )}
-                        </View>
-                        <View style={styles.waveWrap}>
-                          {(item.voiceWaveform || Array(15).fill(14)).map((h: number, i: number) => (
-                            <Animated.View
-                              key={i}
-                              style={[
-                                styles.wavebar,
-                                {
-                                  height: isPlayingThis ? h * (0.5 + Math.random() * 0.5) : h,
-                                  backgroundColor: isMe
-                                    ? (isPlayingThis ? '#A7F3D0' : 'rgba(255,255,255,0.8)')
-                                    : (isPlayingThis ? '#1E5E3A' : '#64748B'),
-                                },
-                              ]}
-                            />
-                          ))}
-                        </View>
-                        <Text style={[styles.voiceDur, isMe ? { color: '#DCFCE7' } : { color: '#64748B' }]}>
-                          {item.voiceDuration || '0:00'}
+                  <Pressable
+                    style={[
+                      styles.bubble,
+                      isMe ? styles.bubbleMe : styles.bubbleThem,
+                      item.isDeleted && (isMe ? styles.bubbleMeDeleted : styles.bubbleThemDeleted),
+                    ]}
+                    onLongPress={() => handleLongPressMessage(item)}
+                    delayLongPress={350}
+                  >
+                    {item.isDeleted ? (
+                      <View style={styles.deletedContainer}>
+                        <Text style={[styles.deletedMsgText, isMe ? styles.deletedMsgTextMe : styles.deletedMsgTextThem]}>
+                          🚫 This message was deleted
                         </Text>
-                      </Pressable>
-                    )}
-
-                    {/* Text */}
-                    {!item.isVoiceNote && !item.offer && item.text && (
-                      <Text style={[styles.msgText, isMe ? styles.msgTextMe : styles.msgTextThem]}>
-                        {item.text}
-                      </Text>
-                    )}
-
-                    {/* Offer card */}
-                    {item.offer && (
-                      <View style={styles.offerCard}>
-                        <View style={styles.offerHeader}>
-                          <Text style={{ fontSize: 20 }}>🤝</Text>
-                          <Text style={styles.offerCardTitle}>Price Offer Proposal</Text>
-                        </View>
-                        <Text style={styles.offerProduct}>{item.offer.productTitle}</Text>
-                        {item.text ? <Text style={styles.offerNote}>{item.text}</Text> : null}
-                        <View style={styles.offerRow}>
-                          <View style={styles.offerChip}>
-                            <Text style={styles.offerChipLabel}>Quantity</Text>
-                            <Text style={styles.offerChipVal}>{item.offer.quantity} {item.offer.unit}</Text>
-                          </View>
-                          <View style={styles.offerChip}>
-                            <Text style={styles.offerChipLabel}>Rate</Text>
-                            <Text style={styles.offerChipVal}>Rs. {item.offer.pricePerUnit}/{item.offer.unit}</Text>
-                          </View>
-                        </View>
-                        <View style={styles.offerTotalRow}>
-                          <Text style={styles.offerTotalLabel}>Total:</Text>
-                          <Text style={styles.offerTotalVal}>Rs. {item.offer.totalAmount.toLocaleString()}</Text>
-                        </View>
-
-                        {item.offer.status === 'pending' ? (
-                          !isMe ? (
-                            <View style={styles.offerBtns}>
-                              <Pressable style={styles.offerAcceptBtn} onPress={() => handleAcceptOffer(item.id)}>
-                                <Text style={styles.offerAcceptTxt}>✓ Accept</Text>
-                              </Pressable>
-                              <Pressable style={styles.offerDeclineBtn} onPress={() => handleDeclineOffer(item.id)}>
-                                <Text style={styles.offerDeclineTxt}>✕ Decline</Text>
-                              </Pressable>
-                              <Pressable style={styles.offerCounterBtn} onPress={() => setShowOfferModal(true)}>
-                                <Text style={styles.offerCounterTxt}>Counter</Text>
-                              </Pressable>
-                            </View>
-                          ) : (
-                            <View style={styles.offerPendingBox}>
-                              <Text style={styles.offerPendingTxt}>⏳ Awaiting response...</Text>
-                            </View>
-                          )
-                        ) : (
-                          <View style={[styles.offerStatusBox,
-                            item.offer.status === 'accepted' ? styles.offerStatusAccepted : styles.offerStatusDeclined]}>
-                            <Text style={styles.offerStatusTxt}>
-                              {item.offer.status === 'accepted' ? '✓ Offer Accepted' : '✕ Offer Declined'}
-                            </Text>
+                      </View>
+                    ) : (
+                      <>
+                        {/* Photo */}
+                        {item.imageUri && item.imageUri !== '📷 Photo' && (
+                          <View style={styles.imgWrap}>
+                            <Image source={{ uri: item.imageUri }} style={styles.imgAttach} contentFit="cover" />
                           </View>
                         )}
-                      </View>
+
+                        {/* Voice note */}
+                        {item.isVoiceNote && (
+                          <Pressable style={styles.voiceRow} onPress={() => handlePlayVoice(item)}>
+                            <View style={[styles.playCircle, isMe && styles.playCircleMe]}>
+                              {isPlayingThis ? (
+                                <View style={styles.pauseIcon}>
+                                  <View style={styles.pauseBar} />
+                                  <View style={styles.pauseBar} />
+                                </View>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: '#FFF' }}>▶</Text>
+                              )}
+                            </View>
+                            <View style={styles.waveWrap}>
+                              {(item.voiceWaveform || Array(15).fill(14)).map((h: number, i: number) => (
+                                <Animated.View
+                                  key={i}
+                                  style={[
+                                    styles.wavebar,
+                                    {
+                                      height: isPlayingThis ? h * (0.5 + Math.random() * 0.5) : h,
+                                      backgroundColor: isMe
+                                        ? (isPlayingThis ? '#A7F3D0' : 'rgba(255,255,255,0.8)')
+                                        : (isPlayingThis ? '#1E5E3A' : '#64748B'),
+                                    },
+                                  ]}
+                                />
+                              ))}
+                            </View>
+                            <Text style={[styles.voiceDur, isMe ? { color: '#DCFCE7' } : { color: '#64748B' }]}>
+                              {item.voiceDuration || '0:00'}
+                            </Text>
+                          </Pressable>
+                        )}
+
+                        {/* Text */}
+                        {!item.isVoiceNote && !item.offer && item.text && (
+                          <Text style={[styles.msgText, isMe ? styles.msgTextMe : styles.msgTextThem]}>
+                            {item.text}
+                          </Text>
+                        )}
+
+                        {/* Offer card */}
+                        {item.offer && (
+                          <View style={styles.offerCard}>
+                            <View style={styles.offerHeader}>
+                              <Text style={{ fontSize: 20 }}>🤝</Text>
+                              <Text style={styles.offerCardTitle}>Price Offer Proposal</Text>
+                            </View>
+                            <Text style={styles.offerProduct}>{item.offer.productTitle}</Text>
+                            {item.text ? <Text style={styles.offerNote}>{item.text}</Text> : null}
+                            <View style={styles.offerRow}>
+                              <View style={styles.offerChip}>
+                                <Text style={styles.offerChipLabel}>Quantity</Text>
+                                <Text style={styles.offerChipVal}>{item.offer.quantity} {item.offer.unit}</Text>
+                              </View>
+                              <View style={styles.offerChip}>
+                                <Text style={styles.offerChipLabel}>Rate</Text>
+                                <Text style={styles.offerChipVal}>Rs. {item.offer.pricePerUnit}/{item.offer.unit}</Text>
+                              </View>
+                            </View>
+                            <View style={styles.offerTotalRow}>
+                              <Text style={styles.offerTotalLabel}>Total:</Text>
+                              <Text style={styles.offerTotalVal}>Rs. {item.offer.totalAmount.toLocaleString()}</Text>
+                            </View>
+
+                            {item.offer.status === 'pending' ? (
+                              !isMe ? (
+                                <View style={styles.offerBtns}>
+                                  <Pressable style={styles.offerAcceptBtn} onPress={() => handleAcceptOffer(item.id)}>
+                                    <Text style={styles.offerAcceptTxt}>✓ Accept</Text>
+                                  </Pressable>
+                                  <Pressable style={styles.offerDeclineBtn} onPress={() => handleDeclineOffer(item.id)}>
+                                    <Text style={styles.offerDeclineTxt}>✕ Decline</Text>
+                                  </Pressable>
+                                  <Pressable style={styles.offerCounterBtn} onPress={() => setShowOfferModal(true)}>
+                                    <Text style={styles.offerCounterTxt}>Counter</Text>
+                                  </Pressable>
+                                </View>
+                              ) : (
+                                <View style={styles.offerPendingBox}>
+                                  <Text style={styles.offerPendingTxt}>⏳ Awaiting response...</Text>
+                                </View>
+                              )
+                            ) : (
+                              <View style={[styles.offerStatusBox,
+                                item.offer.status === 'accepted' ? styles.offerStatusAccepted : styles.offerStatusDeclined]}>
+                                <Text style={styles.offerStatusTxt}>
+                                  {item.offer.status === 'accepted' ? '✓ Offer Accepted' : '✕ Offer Declined'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
+                      </>
                     )}
 
-                    {/* Timestamp */}
-                    <Text style={[styles.msgTime, isMe ? styles.msgTimeMe : styles.msgTimeThem]}>
-                      {item.timestamp}{isMe ? '  ✓✓' : ''}
+                    {/* Timestamp & Edited badge */}
+                    <Text style={[styles.msgTime, isMe ? styles.msgTimeMe : styles.msgTimeThem, item.isDeleted && styles.msgTimeDeleted]}>
+                      {item.timestamp}{item.isEdited && !item.isDeleted ? ' • Edited' : ''}{isMe ? '  ✓✓' : ''}
                     </Text>
-                  </View>
+                  </Pressable>
                 </View>
               );
             }}
@@ -920,6 +1044,97 @@ export function ChatConversationScreen({
             </Pressable>
           </View>
         </Pressable>
+      </Modal>
+
+      {/* ── Message Options Modal (Edit / Delete) ─────────────────────────── */}
+      <Modal visible={!!selectedMsgForAction} transparent animationType="fade">
+        <Pressable style={styles.overlay} onPress={() => setSelectedMsgForAction(null)}>
+          <View style={styles.msgActionModal}>
+            <View style={styles.msgActionHeader}>
+              <Text style={styles.msgActionTitle}>Message Options</Text>
+              <Pressable onPress={() => setSelectedMsgForAction(null)} hitSlop={8}>
+                <Text style={{ fontSize: 18, color: '#94A3B8' }}>✕</Text>
+              </Pressable>
+            </View>
+
+            {selectedMsgForAction?.text && !selectedMsgForAction.isVoiceNote && !selectedMsgForAction.offer && (
+              <View style={styles.msgActionPreview}>
+                <Text style={styles.msgActionPreviewTxt} numberOfLines={2}>
+                  "{selectedMsgForAction.text}"
+                </Text>
+              </View>
+            )}
+
+            {!selectedMsgForAction?.isVoiceNote && !selectedMsgForAction?.offer && (
+              <Pressable style={styles.msgActionBtn} onPress={handleTriggerEdit}>
+                <Text style={{ fontSize: 20 }}>✏️</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.msgActionBtnTxt}>Update Message</Text>
+                  <Text style={styles.msgActionBtnSub}>Edit text (valid within 24 hours)</Text>
+                </View>
+              </Pressable>
+            )}
+
+            <Pressable style={styles.msgActionBtn} onPress={handleTriggerDelete}>
+              <Text style={{ fontSize: 20 }}>🗑️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.msgActionBtnTxt, { color: '#EF4444' }]}>Delete Message</Text>
+                <Text style={styles.msgActionBtnSub}>Remove message for both parties</Text>
+              </View>
+            </Pressable>
+
+            <Pressable style={styles.sheetCancel} onPress={() => setSelectedMsgForAction(null)}>
+              <Text style={styles.sheetCancelTxt}>Cancel</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Edit Message Modal ──────────────────────────────────────────────── */}
+      <Modal visible={editModalVisible} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.overlay}
+        >
+          <View style={styles.editCard}>
+            <View style={styles.editCardHeader}>
+              <Text style={styles.editCardTitle}>✏️ Update Message</Text>
+              <Pressable onPress={() => setEditModalVisible(false)} hitSlop={8}>
+                <Text style={{ fontSize: 18, color: '#94A3B8' }}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.editCardSub}>
+              Edit your message text. Note: Messages can only be edited within 24 hours of sending.
+            </Text>
+
+            <TextInput
+              style={styles.editInput}
+              value={editingText}
+              onChangeText={setEditingText}
+              multiline
+              autoFocus
+              placeholder="Enter updated message..."
+              placeholderTextColor="#94A3B8"
+            />
+
+            <View style={styles.editBtnRow}>
+              <Pressable style={styles.editCancelBtn} onPress={() => setEditModalVisible(false)}>
+                <Text style={styles.editCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.editSaveBtn, (!editingText.trim() || updatingMsg) && { opacity: 0.5 }]}
+                disabled={!editingText.trim() || updatingMsg}
+                onPress={handleSaveEditedMessage}
+              >
+                {updatingMsg ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.editSaveText}>Save Changes</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1091,4 +1306,39 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 18, fontWeight: '800', color: '#1E5E3A' },
   submitBtn: { backgroundColor: '#1E5E3A', borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   submitBtnTxt: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+
+  // Deleted message bubble styles
+  bubbleMeDeleted: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1' },
+  bubbleThemDeleted: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  deletedContainer: { paddingVertical: 2, paddingHorizontal: 2 },
+  deletedMsgText: { fontSize: 13, fontStyle: 'italic' },
+  deletedMsgTextMe: { color: '#64748B' },
+  deletedMsgTextThem: { color: '#64748B' },
+  msgTimeDeleted: { color: '#94A3B8' },
+
+  // Message action modal
+  msgActionModal: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  msgActionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  msgActionTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  msgActionPreview: { backgroundColor: '#F8FAFC', borderRadius: 10, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
+  msgActionPreviewTxt: { fontSize: 13, color: '#334155', fontStyle: 'italic' },
+  msgActionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', gap: 14 },
+  msgActionBtnTxt: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  msgActionBtnSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
+
+  // Edit card modal
+  editCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  editCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  editCardTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  editCardSub: { fontSize: 12, color: '#64748B', marginBottom: 12 },
+  editInput: {
+    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1',
+    borderRadius: 12, padding: 12, fontSize: 14, color: '#0F172A',
+    minHeight: 80, maxHeight: 150, textAlignVertical: 'top', marginBottom: 14,
+  },
+  editBtnRow: { flexDirection: 'row', gap: 10 },
+  editCancelBtn: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  editCancelText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
+  editSaveBtn: { flex: 1, backgroundColor: '#1E5E3A', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  editSaveText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 });
