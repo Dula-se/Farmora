@@ -6,6 +6,7 @@ import userRoutes from './user.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
 import searchRoutes from './search.routes.js';
 import marketRoutes from './market.routes.js';
+import chatRoutes from './chat.routes.js';
 
 const router = Router();
 
@@ -16,5 +17,6 @@ router.use('/users', userRoutes);
 router.use('/wishlist', wishlistRoutes);
 router.use('/search', searchRoutes);
 router.use('/market', marketRoutes);
+router.use('/chat', chatRoutes);
 
 export default router;

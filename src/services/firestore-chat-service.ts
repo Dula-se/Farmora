@@ -41,7 +41,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, storage } from '@/config/firebase';
-import { getStoredUser, ApiUser, fetchProduceListings } from './api';
+import { getStoredUser, ApiUser, fetchProduceListings, apiFetch } from './api';
 import { sendFcmPushNotification } from './notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -143,6 +143,9 @@ function tsToString(ts: any): string {
   if (typeof ts === 'string') return ts;
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
+// Registry for real-time in-app message listeners per conversation
+const activeMessageListeners = new Map<string, Set<(msgs: FirestoreMessage[]) => void>>();
 
 // ─── FirestoreChatService ─────────────────────────────────────────────────────
 
@@ -325,6 +328,29 @@ export const FirestoreChatService = {
       await setDoc(convRef, updates, { merge: true });
     }
 
+    // Sync to MongoDB backend for persistent multi-device history
+    apiFetch('/chat/conversations', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversationId: convId,
+        participants: [myId, params.otherUserId],
+        participantNames: {
+          [myId]: myName,
+          [params.otherUserId]: params.otherUserName || 'User',
+        },
+        participantAvatars: {
+          [myId]: myAvatar,
+          [params.otherUserId]: otherAvatar,
+        },
+        participantRoles: {
+          [myId]: myRole,
+          [params.otherUserId]: params.otherUserRole,
+        },
+        productTitle: params.productTitle || '',
+        productImage: params.productImage || '',
+      }),
+    }).catch(() => {});
+
     return convId;
   },
 
@@ -362,11 +388,40 @@ export const FirestoreChatService = {
     }
   },
 
+  /** Append a confirmed or optimistic message to cache */
+  async appendCachedMessage(conversationId: string, message: FirestoreMessage): Promise<FirestoreMessage[]> {
+    try {
+      const current = await FirestoreChatService.getCachedMessages(conversationId);
+      const filtered = current.filter((m) => m.id !== message.id && (!m.id.startsWith('temp_') || m.text !== message.text));
+      const updated = [...filtered, message];
+      updated.sort((a, b) => {
+        const tA = new Date(a.rawTimestamp || 0).getTime();
+        const tB = new Date(b.rawTimestamp || 0).getTime();
+        return tA - tB;
+      });
+      await FirestoreChatService.cacheMessages(conversationId, updated);
+      return updated;
+    } catch {
+      return [message];
+    }
+  },
+
+  /** Notify any active real-time listeners of an updated message list */
+  notifyMessageListeners(conversationId: string, messages: FirestoreMessage[]) {
+    const listeners = activeMessageListeners.get(conversationId);
+    if (listeners) {
+      listeners.forEach((listener) => {
+        try {
+          listener(messages);
+        } catch {}
+      });
+    }
+  },
+
   /**
    * Listen to all conversations the user is in.
-   * Accepts a single userId or array of user IDs (e.g. mongo id + custom id).
-   * Note: We avoid combining array-contains with orderBy('updatedAt') directly in the Firestore query
-   * because that requires a composite index. Sorting in JS guarantees instant delivery without index errors.
+   * Dual-layer: Real-time Firestore + MongoDB persistent backend API.
+   * Guarantees conversations load seamlessly when logging into a new phone.
    */
   listenToConversations(
     userIdOrIds: string | string[],
@@ -396,102 +451,177 @@ export const FirestoreChatService = {
       onUpdate(convs);
     };
 
-    ids.forEach((uid) => {
-      const q = query(
-        collection(db, 'conversations'),
-        where('participants', 'array-contains', uid)
-      );
-
-      const unsub = onSnapshot(
-        q,
-        (snap) => {
-          snap.docs.forEach((d) => {
-            convMap.set(d.id, {
-              id: d.id,
-              ...(d.data() as Omit<FirestoreConversation, 'id'>),
-            });
+    // 1. Fetch from MongoDB backend (restores chats on brand new phones)
+    apiFetch<FirestoreConversation[]>(`/chat/conversations?userIds=${encodeURIComponent(ids.join(','))}`)
+      .then((res) => {
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          res.data.forEach((c) => {
+            if (!convMap.has(c.id)) {
+              convMap.set(c.id, c);
+            }
           });
           emitSorted();
-        },
-        (error) => {
-          console.error(`[Firestore] listenToConversations snapshot error for uid ${uid}:`, error);
         }
-      );
-      unsubs.push(unsub);
+      })
+      .catch(() => {});
+
+    // 2. Safety timer: If network / Firestore is delayed or offline, clear loading spinner!
+    const safetyTimer = setTimeout(() => {
+      emitSorted();
+    }, 1200);
+
+    // 3. Real-time Firestore listener
+    ids.forEach((uid) => {
+      try {
+        const q = query(
+          collection(db, 'conversations'),
+          where('participants', 'array-contains', uid)
+        );
+
+        const unsub = onSnapshot(
+          q,
+          (snap) => {
+            snap.docs.forEach((d) => {
+              convMap.set(d.id, {
+                id: d.id,
+                ...(d.data() as Omit<FirestoreConversation, 'id'>),
+              });
+            });
+            emitSorted();
+          },
+          (error) => {
+            console.warn(`[Firestore] listenToConversations snapshot notice for uid ${uid}:`, error);
+            emitSorted(); // Ensure loading completes on new devices
+          }
+        );
+        unsubs.push(unsub);
+      } catch (err) {
+        console.warn(`[Firestore] Query error for uid ${uid}:`, err);
+        emitSorted();
+      }
     });
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubs.forEach((u) => u());
     };
   },
 
   /**
    * Listen to messages in a conversation in real-time.
-   * Avoids dropping messages with missing/pending timestamps by ordering in JS.
+   * Dual-layer: Real-time Firestore + active MongoDB backend polling & instant local emitter.
    */
   listenToMessages(
     conversationId: string,
     onUpdate: (messages: FirestoreMessage[]) => void
   ): () => void {
-    const msgsRef = collection(db, 'conversations', conversationId, 'messages');
+    // Register active listener for instant local dispatch
+    if (!activeMessageListeners.has(conversationId)) {
+      activeMessageListeners.set(conversationId, new Set());
+    }
+    activeMessageListeners.get(conversationId)!.add(onUpdate);
 
-    return onSnapshot(
-      msgsRef,
-      (snap) => {
-        const msgs: FirestoreMessage[] = snap.docs.map((d) => {
-          const data = d.data();
-          const raw =
-            data.timestamp instanceof Timestamp
-              ? data.timestamp.toDate().toISOString()
-              : data.createdAt ||
-                (typeof data.timestamp === 'string' ? data.timestamp : null);
+    // 0. Instantly emit cached messages from local AsyncStorage (0ms load)
+    FirestoreChatService.getCachedMessages(conversationId)
+      .then((cached) => {
+        if (cached && cached.length > 0) {
+          onUpdate(cached);
+        }
+      })
+      .catch(() => {});
 
-          return {
-            id: d.id,
-            senderId: data.senderId,
-            senderName: data.senderName,
-            senderRole: data.senderRole,
-            text: data.text || '',
-            timestamp: tsToString(data.timestamp) || tsToString(data.createdAt) || 'Just now',
-            rawTimestamp: raw,
-            isRead: data.isRead ?? false,
-            isEdited: data.isEdited ?? false,
-            editedAt: data.editedAt,
-            isDeleted: data.isDeleted ?? false,
-            deletedAt: data.deletedAt,
-            imageUri: data.imageUri,
-            isVoiceNote: data.isVoiceNote,
-            voiceDuration: data.voiceDuration,
-            voiceWaveform: data.voiceWaveform,
-            voiceUrl: data.voiceUrl,
-            voiceBase64: data.voiceBase64,
-            offer: data.offer,
-          } as FirestoreMessage;
-        });
-
-        const getSortTime = (m: FirestoreMessage) => {
-          if (m.rawTimestamp) {
-            const t = new Date(m.rawTimestamp).getTime();
-            if (!isNaN(t)) return t;
+    // 1. Fetch from MongoDB API
+    const loadFromBackend = () => {
+      apiFetch<FirestoreMessage[]>(`/chat/conversations/${conversationId}/messages`)
+        .then((res) => {
+          if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+            onUpdate(res.data);
+            FirestoreChatService.cacheMessages(conversationId, res.data);
           }
-          return 0;
-        };
+        })
+        .catch(() => {});
+    };
 
-        msgs.sort((a, b) => getSortTime(a) - getSortTime(b));
+    loadFromBackend();
 
-        // Auto-cache messages for instant 0ms retrieval on next open
-        FirestoreChatService.cacheMessages(conversationId, msgs);
+    // 2. Active background polling while the chat screen is open (every 2.5s)
+    // Ensures real-time delivery even if Firestore permissions or project are disabled
+    const pollTimer = setInterval(() => {
+      loadFromBackend();
+    }, 2500);
 
-        onUpdate(msgs);
-      },
-      (error) => {
-        console.error('[Firestore] listenToMessages snapshot error:', error);
+    // 3. Real-time Firestore snapshot listener
+    let unsubSnapshot = () => {};
+    try {
+      const msgsRef = collection(db, 'conversations', conversationId, 'messages');
+      unsubSnapshot = onSnapshot(
+        msgsRef,
+        (snap) => {
+          const msgs: FirestoreMessage[] = snap.docs.map((d) => {
+            const data = d.data();
+            const raw =
+              data.timestamp instanceof Timestamp
+                ? data.timestamp.toDate().toISOString()
+                : data.createdAt ||
+                  (typeof data.timestamp === 'string' ? data.timestamp : null);
+
+            return {
+              id: d.id,
+              senderId: data.senderId,
+              senderName: data.senderName,
+              senderRole: data.senderRole,
+              text: data.text,
+              timestamp: tsToString(data.timestamp),
+              rawTimestamp: raw,
+              isRead: data.isRead ?? false,
+              isEdited: data.isEdited ?? false,
+              editedAt: data.editedAt ? tsToString(data.editedAt) : undefined,
+              isDeleted: data.isDeleted ?? false,
+              imageUri: data.imageUri || undefined,
+              isVoiceNote: data.isVoiceNote ?? false,
+              voiceDuration: data.voiceDuration || undefined,
+              voiceWaveform: data.voiceWaveform || undefined,
+              voiceUrl: data.voiceUrl || undefined,
+              voiceBase64: data.voiceBase64 || undefined,
+              offer: data.offer || undefined,
+            };
+          });
+
+          msgs.sort((a, b) => {
+            const tA = new Date(a.rawTimestamp || 0).getTime();
+            const tB = new Date(b.rawTimestamp || 0).getTime();
+            return tA - tB;
+          });
+
+          FirestoreChatService.cacheMessages(conversationId, msgs);
+          onUpdate(msgs);
+        },
+        (error) => {
+          console.warn(`[Firestore] listenToMessages notice:`, error);
+          loadFromBackend();
+        }
+      );
+    } catch {
+      unsubSnapshot = () => {};
+    }
+
+    return () => {
+      clearInterval(pollTimer);
+      unsubSnapshot();
+      const listeners = activeMessageListeners.get(conversationId);
+      if (listeners) {
+        listeners.delete(onUpdate);
+        if (listeners.size === 0) {
+          activeMessageListeners.delete(conversationId);
+        }
       }
-    );
+    };
   },
 
   /**
-   * Send a text or photo message.
+   * Send a text, photo, or offer message.
+   * Fast-path: immediately saves to MongoDB backend, updates local cache and notifies UI,
+   * then updates Firestore & sends push notifications in background without blocking the UI.
    */
   async sendMessage(params: {
     conversationId: string;
@@ -499,88 +629,137 @@ export const FirestoreChatService = {
     text: string;
     imageUri?: string;  // base64 or URL
     offer?: FirestoreOffer;
-  }): Promise<void> {
+  }): Promise<FirestoreMessage> {
     const myId = params.currentUser.id || params.currentUser._id || '';
     const myRole = params.currentUser.accountType === 'farmer' ? 'farmer' : 'buyer';
-    const msgsRef = collection(db, 'conversations', params.conversationId, 'messages');
+    const now = new Date().toISOString();
+    const timeFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    const msgData: any = {
+    let confirmedMsg: FirestoreMessage = {
+      id: `msg_${Date.now()}`,
       senderId: myId,
-      senderName: params.currentUser.fullName,
+      senderName: params.currentUser.fullName || 'You',
       senderRole: myRole,
       text: params.text || '',
-      timestamp: serverTimestamp(),
-      createdAt: new Date().toISOString(),
+      timestamp: timeFormatted,
+      rawTimestamp: now,
       isRead: false,
       isEdited: false,
       isDeleted: false,
+      imageUri: params.imageUri,
+      isVoiceNote: false,
+      offer: params.offer,
     };
 
-    if (params.imageUri) msgData.imageUri = params.imageUri;
-    if (params.offer) msgData.offer = params.offer;
-
-    await addDoc(msgsRef, msgData);
-
-    // Update conversation last message & unread count
-    const convRef = doc(db, 'conversations', params.conversationId);
+    // 1. FAST PATH: Save to MongoDB backend
     try {
-      const convSnap = await getDoc(convRef);
-      if (convSnap.exists()) {
-        const convData = convSnap.data() as Omit<FirestoreConversation, 'id'>;
-        const otherUserId = convData.participants.find((p) => p !== myId) || '';
-        const currentUnread = convData.unreadCounts?.[otherUserId] || 0;
-
-        await updateDoc(convRef, {
-          lastMessage: params.text || (params.imageUri ? '📷 Photo' : '🤝 Offer proposal'),
-          lastMessageTime: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          [`unreadCounts.${otherUserId}`]: currentUnread + 1,
-        });
-
-        // 🔔 Send real-time FCM Push Notification to recipient
-        if (otherUserId) {
-          sendFcmPushNotification({
-            recipientUserId: otherUserId,
-            title: params.currentUser.fullName || 'New Message',
-            body: params.text || (params.imageUri ? '📷 Sent a photo' : '💬 New message on Famora'),
-            data: {
-              conversationId: params.conversationId,
-              senderId: myId,
-              type: 'chat_message',
-            },
-          }).catch(() => {});
-        }
+      const res = await apiFetch<FirestoreMessage>(`/chat/conversations/${params.conversationId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          senderId: myId,
+          senderName: params.currentUser.fullName || 'User',
+          senderRole: myRole,
+          text: params.text || '',
+          imageUri: params.imageUri,
+          isVoiceNote: false,
+          offer: params.offer,
+        }),
+      });
+      if (res?.data && res.data.id) {
+        confirmedMsg = res.data;
       }
-    } catch {
-      await setDoc(
-        convRef,
-        {
-          lastMessage: params.text || (params.imageUri ? '📷 Photo' : '🤝 Offer proposal'),
-          lastMessageTime: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      ).catch(() => {});
+    } catch (apiErr) {
+      console.warn('[Chat] apiFetch sendMessage notice:', apiErr);
     }
+
+    // 2. Immediately update local cache and push to active UI listener
+    FirestoreChatService.appendCachedMessage(params.conversationId, confirmedMsg).then((updated) => {
+      FirestoreChatService.notifyMessageListeners(params.conversationId, updated);
+    }).catch(() => {});
+
+    // 3. BACKGROUND PATH: Non-blocking sync to Firestore & push notification (never blocks UI)
+    (async () => {
+      try {
+        const msgsRef = collection(db, 'conversations', params.conversationId, 'messages');
+        const msgData: any = {
+          senderId: myId,
+          senderName: params.currentUser.fullName,
+          senderRole: myRole,
+          text: params.text || '',
+          timestamp: serverTimestamp(),
+          createdAt: now,
+          isRead: false,
+          isEdited: false,
+          isDeleted: false,
+        };
+        if (params.imageUri) msgData.imageUri = params.imageUri;
+        if (params.offer) msgData.offer = params.offer;
+
+        await Promise.race([
+          addDoc(msgsRef, msgData),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+        ]).catch(() => {});
+
+        const convRef = doc(db, 'conversations', params.conversationId);
+        const convSnap = await Promise.race([
+          getDoc(convRef),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]).catch(() => null);
+
+        if (convSnap && convSnap.exists()) {
+          const convData = convSnap.data() as Omit<FirestoreConversation, 'id'>;
+          const otherUserId = convData.participants.find((p) => p !== myId) || '';
+          const currentUnread = convData.unreadCounts?.[otherUserId] || 0;
+
+          await updateDoc(convRef, {
+            lastMessage: params.text || (params.imageUri ? '📷 Photo' : '🤝 Offer proposal'),
+            lastMessageTime: now,
+            updatedAt: now,
+            [`unreadCounts.${otherUserId}`]: currentUnread + 1,
+          }).catch(() => {});
+
+          if (otherUserId) {
+            sendFcmPushNotification({
+              recipientUserId: otherUserId,
+              title: params.currentUser.fullName || 'New Message',
+              body: params.text || (params.imageUri ? '📷 Sent a photo' : '💬 New message on Famora'),
+              data: {
+                conversationId: params.conversationId,
+                senderId: myId,
+                type: 'chat_message',
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch {}
+    })();
+
+    return confirmedMsg;
   },
 
   /**
    * Send a real voice note:
-   * 1. Reads local file as base64 via FileSystem (ensuring instantaneous delivery & playback on both sides).
-   * 2. Attempts Firebase Storage upload in background for permanent URL.
-   * 3. Saves to Firestore messages subcollection.
+   * 1. Reads local file as base64 via FileSystem.
+   * 2. Saves to MongoDB backend immediately.
+   * 3. Syncs to Firebase Storage / Firestore asynchronously in background.
    */
   async sendVoiceNote(params: {
     conversationId: string;
     currentUser: ApiUser;
-    audioUri: string;    // local file:// URI from expo-audio recording or picked audio file
+    audioUri: string;
     durationSeconds: number;
     waveform?: number[];
-  }): Promise<void> {
+  }): Promise<FirestoreMessage> {
     const myId = params.currentUser.id || params.currentUser._id || '';
     const myRole = params.currentUser.accountType === 'farmer' ? 'farmer' : 'buyer';
+    const now = new Date().toISOString();
+    const timeFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // 1. Read audio file as base64 (ultra-fast and 100% reliable)
+    const mins = Math.floor(params.durationSeconds / 60);
+    const secs = params.durationSeconds % 60;
+    const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    // 1. Read audio file as base64
     let base64Audio = '';
     try {
       base64Audio = await FileSystem.readAsStringAsync(params.audioUri, {
@@ -590,83 +769,117 @@ export const FirestoreChatService = {
       console.warn('[VoiceNote] Failed to read audio as base64:', fsErr);
     }
 
-    // 2. Try Firebase Storage upload
-    let downloadUrl = '';
-    try {
-      const response = await fetch(params.audioUri);
-      const blob = await response.blob();
-      const msgId = `voice_${Date.now()}`;
-      const audioRef = storageRef(storage, `voice-notes/${params.conversationId}/${msgId}.m4a`);
-      await uploadBytes(audioRef, blob, { contentType: 'audio/m4a' });
-      downloadUrl = await getDownloadURL(audioRef);
-    } catch (storageErr) {
-      console.warn('[VoiceNote] Firebase Storage upload error, falling back to base64 audio:', storageErr);
-    }
-
-    const mins = Math.floor(params.durationSeconds / 60);
-    const secs = params.durationSeconds % 60;
-    const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-    // 3. Write message doc to Firestore
-    const msgsRef = collection(db, 'conversations', params.conversationId, 'messages');
-    await addDoc(msgsRef, {
+    let confirmedMsg: FirestoreMessage = {
+      id: `voice_${Date.now()}`,
       senderId: myId,
-      senderName: params.currentUser.fullName,
+      senderName: params.currentUser.fullName || 'You',
       senderRole: myRole,
-      text: '',
+      text: `🎙️ Voice note (${durationStr})`,
+      timestamp: timeFormatted,
+      rawTimestamp: now,
+      isRead: false,
       isVoiceNote: true,
       voiceDuration: durationStr,
       voiceWaveform: params.waveform || waveformFromDuration(params.durationSeconds),
-      ...(downloadUrl ? { voiceUrl: downloadUrl } : {}),
-      ...(base64Audio ? { voiceBase64: base64Audio } : {}),
-      timestamp: serverTimestamp(),
-      createdAt: new Date().toISOString(),
-      isRead: false,
-      isEdited: false,
-      isDeleted: false,
-    });
+      voiceBase64: base64Audio || undefined,
+    };
 
-    // 4. Update conversation metadata
-    const convRef = doc(db, 'conversations', params.conversationId);
+    // 2. FAST PATH: Save to MongoDB backend
     try {
-      const convSnap = await getDoc(convRef);
-      if (convSnap.exists()) {
-        const convData = convSnap.data() as Omit<FirestoreConversation, 'id'>;
-        const otherUserId = convData.participants.find((p) => p !== myId) || '';
-        const currentUnread = convData.unreadCounts?.[otherUserId] || 0;
-
-        await updateDoc(convRef, {
-          lastMessage: `🎙️ Voice note (${durationStr})`,
-          lastMessageTime: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          [`unreadCounts.${otherUserId}`]: currentUnread + 1,
-        });
-
-        // 🔔 Send real-time FCM Push Notification for voice note
-        if (otherUserId) {
-          sendFcmPushNotification({
-            recipientUserId: otherUserId,
-            title: params.currentUser.fullName || 'Voice Message',
-            body: `🎙️ Sent a voice note (${durationStr})`,
-            data: {
-              conversationId: params.conversationId,
-              senderId: myId,
-              type: 'voice_note',
-            },
-          }).catch(() => {});
-        }
+      const res = await apiFetch<FirestoreMessage>(`/chat/conversations/${params.conversationId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          senderId: myId,
+          senderName: params.currentUser.fullName || 'User',
+          senderRole: myRole,
+          text: `🎙️ Voice note (${durationStr})`,
+          isVoiceNote: true,
+          voiceDuration: durationStr,
+          voiceBase64: base64Audio || undefined,
+        }),
+      });
+      if (res?.data && res.data.id) {
+        confirmedMsg = res.data;
       }
-    } catch {
-      await setDoc(
-        convRef,
-        {
-          lastMessage: `🎙️ Voice note (${durationStr})`,
-          lastMessageTime: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      ).catch(() => {});
+    } catch (apiErr) {
+      console.warn('[Chat] apiFetch sendVoiceNote notice:', apiErr);
     }
+
+    // 3. Immediately update local cache and push to active listener
+    FirestoreChatService.appendCachedMessage(params.conversationId, confirmedMsg).then((updated) => {
+      FirestoreChatService.notifyMessageListeners(params.conversationId, updated);
+    }).catch(() => {});
+
+    // 4. BACKGROUND PATH: Storage & Firestore sync (never blocks UI)
+    (async () => {
+      try {
+        let downloadUrl = '';
+        try {
+          const response = await fetch(params.audioUri);
+          const blob = await response.blob();
+          const msgId = `voice_${Date.now()}`;
+          const audioRef = storageRef(storage, `voice-notes/${params.conversationId}/${msgId}.m4a`);
+          await Promise.race([
+            uploadBytes(audioRef, blob, { contentType: 'audio/m4a' }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+          ]);
+          downloadUrl = await getDownloadURL(audioRef);
+        } catch {}
+
+        const msgsRef = collection(db, 'conversations', params.conversationId, 'messages');
+        await Promise.race([
+          addDoc(msgsRef, {
+            senderId: myId,
+            senderName: params.currentUser.fullName,
+            senderRole: myRole,
+            text: '',
+            isVoiceNote: true,
+            voiceDuration: durationStr,
+            voiceWaveform: params.waveform || waveformFromDuration(params.durationSeconds),
+            ...(downloadUrl ? { voiceUrl: downloadUrl } : {}),
+            ...(base64Audio ? { voiceBase64: base64Audio } : {}),
+            timestamp: serverTimestamp(),
+            createdAt: now,
+            isRead: false,
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+        ]).catch(() => {});
+
+        const convRef = doc(db, 'conversations', params.conversationId);
+        const convSnap = await Promise.race([
+          getDoc(convRef),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]).catch(() => null);
+
+        if (convSnap && convSnap.exists()) {
+          const convData = convSnap.data() as Omit<FirestoreConversation, 'id'>;
+          const otherUserId = convData.participants.find((p) => p !== myId) || '';
+          const currentUnread = convData.unreadCounts?.[otherUserId] || 0;
+
+          await updateDoc(convRef, {
+            lastMessage: `🎙️ Voice note (${durationStr})`,
+            lastMessageTime: now,
+            updatedAt: now,
+            [`unreadCounts.${otherUserId}`]: currentUnread + 1,
+          }).catch(() => {});
+
+          if (otherUserId) {
+            sendFcmPushNotification({
+              recipientUserId: otherUserId,
+              title: params.currentUser.fullName || 'New Voice Note',
+              body: `🎙️ Sent a voice note (${durationStr})`,
+              data: {
+                conversationId: params.conversationId,
+                senderId: myId,
+                type: 'chat_message',
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch {}
+    })();
+
+    return confirmedMsg;
   },
 
   // ── Offers ─────────────────────────────────────────────────────────────────

@@ -77,7 +77,14 @@ export function MessagesListScreen({
       return;
     }
 
-    const myIds = [user.id, user._id].filter(Boolean) as string[];
+    const myIds = [
+      user.id,
+      user._id,
+      user.mobileNumber,
+      user.mobileNumber?.replace(/\s+/g, ''),
+      user.email,
+      user.accountType === 'farmer' ? 'user-farmer-1' : 'user-buyer-1',
+    ].filter(Boolean) as string[];
     const primaryId = myIds[0] || '';
 
     // 1. Instant 0ms load: Show cached conversations immediately
@@ -95,12 +102,21 @@ export function MessagesListScreen({
     // 3. Load live database avatars for registered platform users & farmers
     loadDatabaseAvatars();
 
-    // 4. Real-time Firestore listener with automatic JS sorting & auto-caching
+    // 4. Safety timer: ensure loading indicator finishes even on brand new phone
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 1200);
+
+    // 5. Dual-layer Firestore + MongoDB listener
     const unsub = FirestoreChatService.listenToConversations(myIds, (convs) => {
+      clearTimeout(safetyTimeout);
       setConversations(convs);
       setLoading(false);
     });
-    unsubscribeRef.current = unsub;
+    unsubscribeRef.current = () => {
+      clearTimeout(safetyTimeout);
+      unsub();
+    };
   };
 
   const loadDatabaseAvatars = async () => {

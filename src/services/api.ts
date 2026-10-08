@@ -151,7 +151,7 @@ export async function clearAuthSession(): Promise<void> {
 }
 
 // ─── Authenticated Fetch Helper ──────────────────────────────────────────────
-async function apiFetch<T>(
+export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<{ success: boolean; data: T; message?: string }> {

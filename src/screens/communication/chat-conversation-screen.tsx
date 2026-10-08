@@ -24,7 +24,7 @@ import {
   PermissionsAndroid,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -49,7 +49,7 @@ import {
   FirestoreConversation,
   FirestoreOffer,
 } from '@/services/firestore-chat-service';
-import { getStoredUser, ApiUser } from '@/services/api';
+import { getStoredUser, ApiUser, apiFetch } from '@/services/api';
 import {
   capturePhotoFromCamera,
   pickImageFromGallery,
@@ -87,6 +87,7 @@ export function ChatConversationScreen({
   onRateUser,
   currentRole = 'buyer',
 }: ChatConversationScreenProps) {
+  const insets = useSafeAreaInsets();
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
   const [messages, setMessages] = useState<FirestoreMessage[]>([]);
   const [convMeta, setConvMeta] = useState<FirestoreConversation | null>(null);
@@ -152,8 +153,9 @@ export function ChatConversationScreen({
     setCurrentUser(user);
 
     // 2. Fetch conversation metadata & other user's real database avatar non-blocking in background
-    getDoc(doc(db, 'conversations', conversationId))
-      .then(async (convSnap) => {
+    const fetchMetadata = async () => {
+      try {
+        const convSnap = await getDoc(doc(db, 'conversations', conversationId));
         if (convSnap.exists()) {
           const cData = convSnap.data() as any;
           setConvMeta({ id: convSnap.id, ...cData });
@@ -166,11 +168,26 @@ export function ChatConversationScreen({
               }
             } catch {}
           }
+          return;
         }
-      })
-      .catch((e) => {
-        console.warn('[Chat] Failed to load conversation doc:', e);
-      });
+      } catch (e) {
+        console.warn('[Chat] Firestore getDoc notice:', e);
+      }
+
+      // Fallback: Fetch from backend MongoDB API for new devices/offline
+      try {
+        const res = await apiFetch<any>(`/chat/conversations/${conversationId}`);
+        if (res?.data) {
+          const cData = res.data;
+          setConvMeta(cData);
+          const targetUid = otherUserId || cData.participants?.find((p: string) => p !== (user?.id || user?._id));
+          if (targetUid && cData.participantAvatars?.[targetUid]) {
+            setLiveOtherAvatar(cData.participantAvatars[targetUid]);
+          }
+        }
+      } catch {}
+    };
+    fetchMetadata();
 
     // 3. Real-time messages listener immediately
     const unsub = FirestoreChatService.listenToMessages(conversationId, (msgs) => {
@@ -348,20 +365,60 @@ export function ChatConversationScreen({
       const uri = recorder.uri;
       if (!uri) return;
 
-      setSending(true);
       const waveform = Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 24));
+      const mins = Math.floor(duration / 60);
+      const secs = duration % 60;
+      const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-      await FirestoreChatService.sendVoiceNote({
-        conversationId,
-        currentUser,
-        audioUri: uri,
-        durationSeconds: duration,
-        waveform,
-      });
-    } catch (err) {
-      console.error('[Voice] Stop/send error:', err);
-      Alert.alert('Error', 'Could not send voice note.');
-    } finally {
+      // Optimistic message bubble
+      const tempId = `temp_voice_${Date.now()}`;
+      const optimisticMsg: FirestoreMessage = {
+        id: tempId,
+        senderId: currentUser.id || currentUser._id || '',
+        senderName: currentUser.fullName || 'You',
+        senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
+        text: `🎙️ Voice note (${durationStr})`,
+        isVoiceNote: true,
+        voiceDuration: durationStr,
+        voiceWaveform: waveform,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        rawTimestamp: new Date().toISOString(),
+        isRead: false,
+        isEdited: false,
+        isDeleted: false,
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
+      setSending(true);
+      try {
+        const confirmed = await FirestoreChatService.sendVoiceNote({
+          conversationId,
+          currentUser,
+          audioUri: uri,
+          durationSeconds: duration,
+          waveform,
+        });
+        if (confirmed) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === tempId);
+            if (idx !== -1) {
+              const next = [...prev];
+              next[idx] = confirmed;
+              return next;
+            }
+            return [...prev.filter((m) => m.id !== confirmed.id), confirmed];
+          });
+        }
+      } catch (err) {
+        console.error('[Voice] Stop/send error:', err);
+        Alert.alert('Error', 'Could not send voice note.');
+      } finally {
+        setSending(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      }
+    } catch (recorderErr) {
+      console.warn('[Voice] Recorder error:', recorderErr);
       setSending(false);
     }
   };
@@ -373,21 +430,59 @@ export function ChatConversationScreen({
       const picked = await pickAudioFile();
       if (!picked || !picked.uri || !currentUser) return;
 
-      setSending(true);
       const waveform = Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 24));
       const estimatedDuration = Math.max(3, Math.min(30, Math.round((picked.size || 60000) / 16000)));
+      const mins = Math.floor(estimatedDuration / 60);
+      const secs = estimatedDuration % 60;
+      const durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-      await FirestoreChatService.sendVoiceNote({
-        conversationId,
-        currentUser,
-        audioUri: picked.uri,
-        durationSeconds: estimatedDuration,
-        waveform,
-      });
-    } catch (err: any) {
-      console.error('[Voice] Attach audio error:', err);
-      Alert.alert('Error', err?.message || 'Could not attach audio note.');
-    } finally {
+      const tempId = `temp_voice_${Date.now()}`;
+      const optimisticMsg: FirestoreMessage = {
+        id: tempId,
+        senderId: currentUser.id || currentUser._id || '',
+        senderName: currentUser.fullName || 'You',
+        senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
+        text: `🎙️ Voice note (${durationStr})`,
+        isVoiceNote: true,
+        voiceDuration: durationStr,
+        voiceWaveform: waveform,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        rawTimestamp: new Date().toISOString(),
+        isRead: false,
+        isEdited: false,
+        isDeleted: false,
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
+      setSending(true);
+      try {
+        const confirmed = await FirestoreChatService.sendVoiceNote({
+          conversationId,
+          currentUser,
+          audioUri: picked.uri,
+          durationSeconds: estimatedDuration,
+          waveform,
+        });
+        if (confirmed) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === tempId);
+            if (idx !== -1) {
+              const next = [...prev];
+              next[idx] = confirmed;
+              return next;
+            }
+            return [...prev.filter((m) => m.id !== confirmed.id), confirmed];
+          });
+        }
+      } catch (err: any) {
+        console.error('[Voice] Attach audio error:', err);
+        Alert.alert('Error', err?.message || 'Could not attach audio note.');
+      } finally {
+        setSending(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      }
+    } catch {
       setSending(false);
     }
   };
@@ -488,8 +583,9 @@ export function ChatConversationScreen({
     setInputText('');
 
     // Optimistic UI: display bubble immediately without waiting for network roundtrip
+    const tempId = `temp_${Date.now()}`;
     const optimisticMsg: FirestoreMessage = {
-      id: `temp_${Date.now()}`,
+      id: tempId,
       senderId: currentUser.id || currentUser._id || '',
       senderName: currentUser.fullName || 'You',
       senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
@@ -505,13 +601,27 @@ export function ChatConversationScreen({
 
     setSending(true);
     try {
-      await FirestoreChatService.sendMessage({
+      const confirmed = await FirestoreChatService.sendMessage({
         conversationId,
         currentUser,
         text: msg,
       });
+      if (confirmed) {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === tempId);
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = confirmed;
+            return next;
+          }
+          return [...prev.filter((m) => m.id !== confirmed.id), confirmed];
+        });
+      }
+    } catch (err) {
+      console.warn('[Chat] handleSendText error:', err);
     } finally {
       setSending(false);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 
@@ -526,16 +636,47 @@ export function ChatConversationScreen({
         : await pickImageFromGallery({ quality: 0.5 });
 
     if (result) {
+      const tempId = `temp_photo_${Date.now()}`;
+      const optimisticMsg: FirestoreMessage = {
+        id: tempId,
+        senderId: currentUser.id || currentUser._id || '',
+        senderName: currentUser.fullName || 'You',
+        senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
+        text: '📷 Photo',
+        imageUri: result.dataUrl,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        rawTimestamp: new Date().toISOString(),
+        isRead: false,
+        isEdited: false,
+        isDeleted: false,
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
       setSending(true);
       try {
-        await FirestoreChatService.sendMessage({
+        const confirmed = await FirestoreChatService.sendMessage({
           conversationId,
           currentUser,
           text: '📷 Photo',
           imageUri: result.dataUrl,
         });
+        if (confirmed) {
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === tempId);
+            if (idx !== -1) {
+              const next = [...prev];
+              next[idx] = confirmed;
+              return next;
+            }
+            return [...prev.filter((m) => m.id !== confirmed.id), confirmed];
+          });
+        }
+      } catch (err) {
+        console.warn('[Chat] handleSendPhoto error:', err);
       } finally {
         setSending(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
       }
     }
   };
@@ -559,17 +700,48 @@ export function ChatConversationScreen({
       counterBy: currentRole,
     };
 
+    const tempId = `temp_offer_${Date.now()}`;
+    const optimisticMsg: FirestoreMessage = {
+      id: tempId,
+      senderId: currentUser.id || currentUser._id || '',
+      senderName: currentUser.fullName || 'You',
+      senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
+      text: `Proposed offer: ${qty} kg @ Rs. ${price}/kg`,
+      offer,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      rawTimestamp: new Date().toISOString(),
+      isRead: false,
+      isEdited: false,
+      isDeleted: false,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setShowOfferModal(false);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
     setSending(true);
     try {
-      await FirestoreChatService.sendMessage({
+      const confirmed = await FirestoreChatService.sendMessage({
         conversationId,
         currentUser,
         text: `Proposed offer: ${qty} kg @ Rs. ${price}/kg`,
         offer,
       });
-      setShowOfferModal(false);
+      if (confirmed) {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === tempId);
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = confirmed;
+            return next;
+          }
+          return [...prev.filter((m) => m.id !== confirmed.id), confirmed];
+        });
+      }
+    } catch (err) {
+      console.warn('[Chat] handleSendOffer error:', err);
     } finally {
       setSending(false);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 
@@ -964,7 +1136,7 @@ export function ChatConversationScreen({
 
         {/* ── Voice recording bar ─────────────────────────────────────────── */}
         {isRecording ? (
-          <View style={styles.recordBar}>
+          <View style={[styles.recordBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 10 : 8) }]}>
             <Pressable style={styles.cancelRecordBtn} onPress={() => stopRecording(false)}>
               <Text style={styles.cancelRecordTxt}>✕ Cancel</Text>
             </Pressable>
@@ -979,7 +1151,7 @@ export function ChatConversationScreen({
           </View>
         ) : (
           /* ── Input bar ─────────────────────────────────────────────────── */
-          <View style={styles.inputBar}>
+          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 10 : 8) }]}>
             <Pressable style={styles.inputIconBtn} onPress={() => setShowActionSheet(true)}>
               <Text style={{ fontSize: 20, color: '#1E5E3A', fontWeight: '800' }}>+</Text>
             </Pressable>

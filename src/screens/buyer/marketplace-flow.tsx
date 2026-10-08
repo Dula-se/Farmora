@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiProduceItem } from '@/services/api';
 import { BuyerHomeScreen } from './buyer-home-screen';
 import { AllCategoriesScreen } from './all-categories-screen';
@@ -90,6 +91,7 @@ interface MarketplaceFlowProps {
 }
 
 export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
+  const insets = useSafeAreaInsets();
   const [currentView, setCurrentView] = useState<BuyerScreenView>('home');
   const [activeTab, setActiveTab] = useState<BuyerTab>('home');
   const [selectedCategory, setSelectedCategory] = useState({ id: 'vegetables', name: 'Vegetables' });
@@ -730,7 +732,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
 
       {/* Persistent Bottom Tab Bar */}
       {!isFullScreenView && (
-        <View style={styles.bottomTabBar}>
+        <View style={[styles.bottomTabBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 18 : 14) }]}>
           {/* 1. Home */}
           <Pressable
             style={styles.tabBtn}
@@ -812,8 +814,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
-    paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    paddingTop: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.05,

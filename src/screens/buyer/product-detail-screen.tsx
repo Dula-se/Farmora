@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
@@ -47,6 +47,7 @@ export function ProductDetailScreen({
   onOpenFarmerProfile,
 }: ProductDetailScreenProps) {
   const { addToCart, totalCount: cartTotalCount } = useCart();
+  const insets = useSafeAreaInsets();
   const [selectedQty, setSelectedQty] = useState(product.minimumOrderQuantity || 10);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
@@ -395,7 +396,7 @@ export function ProductDetailScreen({
       </ScrollView>
 
       {/* Bottom Sticky Action Bar */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 14 : 10) }]}>
         <View style={styles.qtySelector}>
           <Pressable
             style={[styles.qtyBtn, selectedQty <= minQty && styles.qtyBtnDisabled]}
@@ -887,7 +888,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#E2E8F0',
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { clearAuthSession, getStoredUser, ApiUser } from '@/services/api';
 import { FarmerDashboardScreen } from './farmer-dashboard-screen';
@@ -75,6 +75,7 @@ interface FarmerFlowProps {
 }
 
 export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
+  const insets = useSafeAreaInsets();
   const [currentView, setCurrentView] = useState<FarmerScreenView>('dashboard');
   const [activeTab, setActiveTab] = useState<FarmerTab>('dashboard');
   const [newlyAddedTitle, setNewlyAddedTitle] = useState<string | null>(null);
@@ -524,7 +525,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
 
       {/* Persistent Bottom Tab Bar */}
       {!isFullScreen && (
-        <View style={styles.bottomTabBar}>
+        <View style={[styles.bottomTabBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 18 : 14) }]}>
           {/* 1. Dashboard */}
           <Pressable
             style={styles.tabBtn}
@@ -609,8 +610,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
-    paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    paddingTop: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.05,

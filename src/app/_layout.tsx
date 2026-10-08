@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StyleSheet, View, useColorScheme } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type * as Notifications from 'expo-notifications';
 import { useNotifications } from '@/hooks/use-notifications';
 
@@ -225,10 +226,12 @@ export default function TabLayout() {
   };
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <CartProvider>
-        {renderContent()}
-      </CartProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <CartProvider>
+          {renderContent()}
+        </CartProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
