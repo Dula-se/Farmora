@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -121,6 +122,32 @@ interface FarmMapScreenProps {
   onOpenFarmerProfile?: (farmer: { id: string; name: string; avatar?: string; district?: string }) => void;
 }
 
+export const GEOAPIFY_API_KEY =
+  'eyJhbGciOiJIUzI1NiJ9.eyJhIjoiYWNfYnc1cjIwcnIiLCJqdGkiOiI3MGIxMmFkODMwZTY2MmZmNTYzMDEwYTY2NzI2ZDEyZCJ9.VintDZYgqapaFB1f5_seIlZrYeWbo0ViebMmJxSGsxY';
+
+// Slippy Map / Web Mercator coordinate functions
+function latLonToPixel(lat: number, lon: number, zoom: number): { x: number; y: number } {
+  const n = Math.pow(2, zoom);
+  const x = ((lon + 180) / 360) * n * 256;
+  const latRad = (lat * Math.PI) / 180;
+  const y =
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
+    n *
+    256;
+  return { x, y };
+}
+
+function getTileUrl(zoom: number, x: number, y: number, mode: 'street' | 'satellite' | 'dark'): string {
+  if (mode === 'satellite') {
+    return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}.jpg`;
+  }
+  if (mode === 'dark') {
+    return `https://maps.geoapify.com/v1/tile/dark-matter/${zoom}/${x}/${y}.png?apiKey=${GEOAPIFY_API_KEY}`;
+  }
+  // Geoapify high-resolution street cartography with authenticated token
+  return `https://maps.geoapify.com/v1/tile/osm-bright/${zoom}/${x}/${y}.png?apiKey=${GEOAPIFY_API_KEY}`;
+}
+
 export function FarmMapScreen({
   initialFarmId,
   initialView = 'map',
@@ -131,8 +158,8 @@ export function FarmMapScreen({
   onOpenFarmerProfile,
 }: FarmMapScreenProps) {
   const [activeView, setActiveView] = useState<'map' | 'list'>(initialView);
-  const [mapMode, setMapMode] = useState<'street' | 'satellite'>('street');
-  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [mapMode, setMapMode] = useState<'street' | 'satellite' | 'dark'>('street');
+  const [zoom, setZoom] = useState<number>(11);
   const [searchQuery, setSearchQuery] = useState('');
 
   const initialFarm = initialFarmId
@@ -145,6 +172,15 @@ export function FarmMapScreen({
     : MOCK_FARMS[0];
 
   const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(initialFarm);
+  const [centerCoord, setCenterCoord] = useState<{ lat: number; lon: number }>({
+    lat: initialFarm?.latitude || 7.20,
+    lon: initialFarm?.longitude || 80.72,
+  });
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const currentOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [mapSize, setMapSize] = useState<{ width: number; height: number }>({ width: 380, height: 480 });
+
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showNoFarmsModal, setShowNoFarmsModal] = useState(false);
@@ -155,6 +191,43 @@ export function FarmMapScreen({
   const [maxDistance, setMaxDistance] = useState(50);
   const [onlyOrganic, setOnlyOrganic] = useState(false);
   const [onlyVerified, setOnlyVerified] = useState(true);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3,
+      onPanResponderGrant: () => {
+        panStartRef.current = { ...currentOffsetRef.current };
+      },
+      onPanResponderMove: (_, gesture) => {
+        const nextX = panStartRef.current.x + gesture.dx;
+        const nextY = panStartRef.current.y + gesture.dy;
+        currentOffsetRef.current = { x: nextX, y: nextY };
+        setPanOffset({ x: nextX, y: nextY });
+      },
+      onPanResponderRelease: () => {},
+    })
+  ).current;
+
+  const centerOnFarm = (farm: FarmLocation) => {
+    setSelectedFarm(farm);
+    setCenterCoord({ lat: farm.latitude, lon: farm.longitude });
+    currentOffsetRef.current = { x: 0, y: 0 };
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  const handleZoomIn = () => {
+    setZoom((prev) => Math.min(prev + 1, 14));
+    currentOffsetRef.current = { x: 0, y: 0 };
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  const handleZoomOut = () => {
+    setZoom((prev) => Math.max(prev - 1, 9));
+    currentOffsetRef.current = { x: 0, y: 0 };
+    setPanOffset({ x: 0, y: 0 });
+  };
 
   const toggleSaveFarm = (farmId: string) => {
     if (savedFarms.includes(farmId)) {
@@ -193,19 +266,6 @@ export function FarmMapScreen({
     Linking.openURL(`tel:${phone}`);
   };
 
-  const getPinCoords = (lat: number, lon: number) => {
-    const minLat = 6.80;
-    const maxLat = 7.60;
-    const minLon = 80.50;
-    const maxLon = 81.00;
-    const topPercent = ((maxLat - lat) / (maxLat - minLat)) * 65 + 16;
-    const leftPercent = ((lon - minLon) / (maxLon - minLon)) * 68 + 16;
-    return {
-      top: `${Math.min(84, Math.max(12, topPercent))}%`,
-      left: `${Math.min(84, Math.max(12, leftPercent))}%`,
-    };
-  };
-
   const getFarmCropEmoji = (crops: string[]) => {
     const first = crops[0]?.toLowerCase() || '';
     if (first.includes('carrot') || first.includes('beet')) return '🥕';
@@ -230,6 +290,43 @@ export function FarmMapScreen({
     }
     return true;
   });
+
+  // Calculate real tiles for viewport
+  const centerPixel = latLonToPixel(centerCoord.lat, centerCoord.lon, zoom);
+  const viewLeft = centerPixel.x - mapSize.width / 2 - panOffset.x;
+  const viewTop = centerPixel.y - mapSize.height / 2 - panOffset.y;
+
+  const minTileX = Math.floor(viewLeft / 256) - 1;
+  const maxTileX = Math.floor((viewLeft + mapSize.width) / 256) + 1;
+  const minTileY = Math.floor(viewTop / 256) - 1;
+  const maxTileY = Math.floor((viewTop + mapSize.height) / 256) + 1;
+
+  const visibleTiles: { key: string; screenX: number; screenY: number; url: string }[] = [];
+  for (let tx = minTileX; tx <= maxTileX; tx++) {
+    for (let ty = minTileY; ty <= maxTileY; ty++) {
+      visibleTiles.push({
+        key: `${zoom}-${tx}-${ty}-${mapMode}`,
+        screenX: tx * 256 - viewLeft,
+        screenY: ty * 256 - viewTop,
+        url: getTileUrl(zoom, tx, ty, mapMode),
+      });
+    }
+  }
+
+  // Calculate pixel positions for real markers
+  const markerPositions = filteredFarms.map((farm) => {
+    const fPixel = latLonToPixel(farm.latitude, farm.longitude, zoom);
+    return {
+      farm,
+      screenX: fPixel.x - viewLeft,
+      screenY: fPixel.y - viewTop,
+      isSelected: selectedFarm?.id === farm.id,
+    };
+  });
+
+  const userPixel = latLonToPixel(7.2906, 80.6337, zoom);
+  const userScreenX = userPixel.x - viewLeft;
+  const userScreenY = userPixel.y - viewTop;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -271,7 +368,7 @@ export function FarmMapScreen({
           style={[styles.toggleBtn, activeView === 'map' && styles.toggleBtnActive]}
           onPress={() => setActiveView('map')}>
           <Text style={[styles.toggleBtnText, activeView === 'map' && styles.toggleBtnTextActive]}>
-            🗺️ Live GPS Map ({filteredFarms.length})
+            🗺️ Live Real Map ({filteredFarms.length})
           </Text>
         </Pressable>
         <Pressable
@@ -285,75 +382,102 @@ export function FarmMapScreen({
 
       {/* Main View Area */}
       {activeView === 'map' ? (
-        <View style={styles.mapCanvas}>
-          {/* Real Map Photographic / Cartographic Layer with Interactive Zoom */}
-          <View style={styles.mapGraphicContainer}>
+        <View
+          style={styles.mapCanvas}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            if (width > 0 && height > 0) {
+              setMapSize({ width, height });
+            }
+          }}
+          {...panResponder.panHandlers}>
+          {/* Real Embedded Cartographic / Satellite Map Tiles */}
+          {visibleTiles.map((tile) => (
             <Image
-              source={{
-                uri:
-                  mapMode === 'satellite'
-                    ? 'https://images.unsplash.com/photo-1524661135-423995f22d0b?w=1200&auto=format&fit=crop&q=80'
-                    : 'https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=1200&auto=format&fit=crop&q=80',
+              key={tile.key}
+              source={{ uri: tile.url }}
+              style={{
+                position: 'absolute',
+                left: tile.screenX,
+                top: tile.screenY,
+                width: 256,
+                height: 256,
               }}
-              style={[
-                styles.realMapImage,
-                { transform: [{ scale: zoomLevel }] },
-              ]}
               contentFit="cover"
+              cachePolicy="disk"
             />
+          ))}
 
-            {/* Road Corridor and Route Lines */}
-            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-              <Svg width="100%" height="100%" viewBox="0 0 400 500" style={StyleSheet.absoluteFill}>
-                {/* Major Highways connecting Central Province Farms */}
-                <Path d="M 110 50 L 140 160 L 220 240 L 290 350 L 330 450" stroke="#F59E0B" strokeWidth={5} strokeLinecap="round" opacity={0.85} />
-                <Path d="M 70 240 L 220 240 L 340 260" stroke="#3B82F6" strokeWidth={4} strokeLinecap="round" opacity={0.75} />
-              </Svg>
-            </View>
-
-            {/* Farm Pins with exact Sri Lanka coordinates */}
-            {filteredFarms.map((farm) => {
-              const coords = getPinCoords(farm.latitude, farm.longitude);
-              const isSelected = selectedFarm?.id === farm.id;
-              return (
-                <Pressable
-                  key={farm.id}
+          {/* Real Farm Markers Positioned on Slippy Map Tiles */}
+          {markerPositions.map(({ farm, screenX, screenY, isSelected }) => (
+            <Pressable
+              key={farm.id}
+              style={[
+                styles.mapPin,
+                {
+                  left: screenX - 22,
+                  top: screenY - 50,
+                },
+              ]}
+              onPress={() => centerOnFarm(farm)}>
+              {/* Pin Callout Badge */}
+              <View
+                style={[
+                  styles.pinCallout,
+                  isSelected && styles.pinCalloutActive,
+                ]}>
+                <Text
                   style={[
-                    styles.mapPin,
-                    { top: coords.top as any, left: coords.left as any },
+                    styles.pinCalloutName,
+                    isSelected && styles.pinCalloutNameActive,
                   ]}
-                  onPress={() => setSelectedFarm(farm)}>
-                  {/* Pin Callout Bubble */}
-                  <View style={[styles.pinCallout, isSelected && styles.pinCalloutActive]}>
-                    <Text style={[styles.pinCalloutName, isSelected && styles.pinCalloutNameActive]} numberOfLines={1}>
-                      {farm.farmerName.split(' ')[0]}
-                    </Text>
-                    <Text style={styles.pinCalloutDist}>{farm.distanceKm}km</Text>
-                  </View>
-                  <View style={[styles.pinBubble, isSelected && styles.pinBubbleActive]}>
-                    <Text style={styles.pinEmoji}>{getFarmCropEmoji(farm.crops)}</Text>
-                  </View>
-                  <View style={[styles.pinStem, isSelected && styles.pinStemActive]} />
-                </Pressable>
-              );
-            })}
-
-            {/* User Live GPS Location Marker */}
-            <View style={[styles.userDotContainer, { top: '68%', left: '40%' }]}>
-              <View style={styles.userPulse} />
-              <View style={styles.userDot} />
-              <View style={styles.userCallout}>
-                <Text style={styles.userCalloutText}>📍 You (Central Hub)</Text>
+                  numberOfLines={1}>
+                  {farm.farmerName.split(' ')[0]}
+                </Text>
+                <Text style={styles.pinCalloutDist}>• {farm.distanceKm}km</Text>
               </View>
+
+              {/* Pin Emoji Bubble */}
+              <View
+                style={[
+                  styles.pinBubble,
+                  isSelected && styles.pinBubbleActive,
+                ]}>
+                <Text style={styles.pinEmoji}>
+                  {getFarmCropEmoji(farm.crops)}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.pinStem,
+                  isSelected && styles.pinStemActive,
+                ]}
+              />
+            </Pressable>
+          ))}
+
+          {/* User Live GPS Marker */}
+          <View
+            style={[
+              styles.userDotContainer,
+              {
+                left: userScreenX - 14,
+                top: userScreenY - 14,
+              },
+            ]}>
+            <View style={styles.userPulse} />
+            <View style={styles.userDot} />
+            <View style={styles.userCallout}>
+              <Text style={styles.userCalloutText}>📍 You (Kandy Hub)</Text>
             </View>
           </View>
 
-          {/* Top Floating Live GPS & Google Maps Launcher Bar */}
+          {/* Floating Live GPS & Google Maps Launcher Bar */}
           <View style={styles.mapTopFloatingBar}>
             <View style={styles.gpsLiveBadge}>
               <View style={styles.gpsLiveIndicator} />
               <Text style={styles.gpsLiveText}>
-                Sri Lanka GPS • {selectedFarm ? `${selectedFarm.latitude.toFixed(3)}°N, ${selectedFarm.longitude.toFixed(3)}°E` : 'Active'}
+                Geoapify Real Map • {selectedFarm ? `${selectedFarm.latitude.toFixed(3)}°N, ${selectedFarm.longitude.toFixed(3)}°E` : 'Active'}
               </Text>
             </View>
 
@@ -365,25 +489,42 @@ export function FarmMapScreen({
             </Pressable>
           </View>
 
-          {/* Floating Controls: Street/Satellite Toggle & Zoom */}
+          {/* Floating Controls: Mode Switcher (Street / Satellite / Dark), Zoom In/Out, Re-center */}
           <View style={styles.mapFloatingControls}>
             <Pressable
-              style={[styles.floatingControlBtn, mapMode === 'satellite' && styles.floatingControlBtnActive]}
-              onPress={() => setMapMode(mapMode === 'satellite' ? 'street' : 'satellite')}>
-              <Text style={styles.floatingControlIcon}>{mapMode === 'satellite' ? '🗺️' : '🛰️'}</Text>
+              style={[
+                styles.floatingControlBtn,
+                (mapMode === 'satellite' || mapMode === 'dark') && styles.floatingControlBtnActive,
+              ]}
+              onPress={() => {
+                if (mapMode === 'street') setMapMode('satellite');
+                else if (mapMode === 'satellite') setMapMode('dark');
+                else setMapMode('street');
+              }}>
+              <Text style={styles.floatingControlIcon}>
+                {mapMode === 'satellite' ? '🛰️' : mapMode === 'dark' ? '🌙' : '🗺️'}
+              </Text>
             </Pressable>
 
             <Pressable
               style={styles.floatingControlBtn}
-              onPress={() => setZoomLevel((prev) => Math.min(prev + 0.25, 2.0))}>
+              onPress={handleZoomIn}>
               <Text style={styles.floatingControlIcon}>➕</Text>
             </Pressable>
 
             <Pressable
               style={styles.floatingControlBtn}
-              onPress={() => setZoomLevel((prev) => Math.max(prev - 0.25, 1.0))}>
+              onPress={handleZoomOut}>
               <Text style={styles.floatingControlIcon}>➖</Text>
             </Pressable>
+
+            {selectedFarm && (
+              <Pressable
+                style={styles.floatingControlBtn}
+                onPress={() => centerOnFarm(selectedFarm)}>
+                <Text style={styles.floatingControlIcon}>🎯</Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Bottom Floating Farm Details Sheet */}
@@ -477,25 +618,38 @@ export function FarmMapScreen({
         <ScrollView
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}>
-          {/* Top Mini Map Preview Card with Live Route Line */}
-          <View style={styles.topMiniMapCard}>
+          {/* Top Mini Map Preview Card with Real Map Tiles */}
+          <Pressable
+            style={styles.topMiniMapCard}
+            onPress={() => setActiveView('map')}>
             <View style={styles.miniMapGraphic}>
-              <Svg width="100%" height="110" viewBox="0 0 340 110">
-                <Path d="M 0 55 L 340 55" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
-                <Path d="M 170 0 L 170 110" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
-                {/* Connected Transit Route */}
-                <Path d="M 30 80 L 110 30 L 230 45 L 290 85" stroke="#22C55E" strokeWidth={4} fill="none" strokeLinecap="round" />
-                {/* Pins */}
-                <Path d="M 30 80 a 6 6 0 1 0 0.01 0" fill="#2563EB" />
-                <Path d="M 110 30 a 6 6 0 1 0 0.01 0" fill="#22C55E" />
-                <Path d="M 230 45 a 6 6 0 1 0 0.01 0" fill="#F59E0B" />
-                <Path d="M 290 85 a 6 6 0 1 0 0.01 0" fill="#22C55E" />
-              </Svg>
+              <Image
+                source={{
+                  uri: `https://maps.geoapify.com/v1/tile/osm-bright/11/1482/982.png?apiKey=${GEOAPIFY_API_KEY}`,
+                }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+              />
+              <View
+                style={[
+                  StyleSheet.absoluteFill,
+                  { backgroundColor: 'rgba(0,0,0,0.1)' },
+                ]}
+              />
+              <View style={{ position: 'absolute', top: 35, left: 60, alignItems: 'center' }}>
+                <Text style={{ fontSize: 16 }}>🌱</Text>
+              </View>
+              <View style={{ position: 'absolute', top: 50, left: 160, alignItems: 'center' }}>
+                <Text style={{ fontSize: 16 }}>🥕</Text>
+              </View>
+              <View style={{ position: 'absolute', top: 25, left: 240, alignItems: 'center' }}>
+                <Text style={{ fontSize: 16 }}>🍓</Text>
+              </View>
             </View>
             <View style={styles.miniMapFooter}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.miniMapTitle}>Regional Delivery Network</Text>
-                <Text style={styles.miniMapSub}>Farms within 50km radius • Active dispatch</Text>
+                <Text style={styles.miniMapSub}>Central Province, Sri Lanka • Real Map Navigation</Text>
               </View>
               <Pressable
                 style={styles.expandMapBtn}
@@ -503,7 +657,7 @@ export function FarmMapScreen({
                 <Text style={styles.expandMapText}>Open Map ↗</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
 
           {/* Quick AI Match Banner */}
           {onOpenFarmerMatching && (
