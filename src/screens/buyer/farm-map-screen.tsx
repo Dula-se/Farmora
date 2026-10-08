@@ -39,76 +39,112 @@ export interface FarmLocation {
 const MOCK_FARMS: FarmLocation[] = [
   {
     id: 'f-1',
-    name: 'Perera Organic Farm',
-    farmerName: 'K. Perera',
-    phone: '+94 77 123 4567',
-    address: '12/A Fresh Produce Valley, Katugastota',
-    district: 'Kandy',
-    distanceKm: 18.4,
-    driveTimeMin: 35,
-    rating: 4.9,
-    reviewsCount: 124,
-    isVerified: true,
-    isOrganic: true,
-    latitude: 7.2906,
-    longitude: 80.6337,
-    image: 'https://images.unsplash.com/photo-1500937386664-56d1dfef3854?w=500&auto=format&fit=crop&q=60',
-    crops: ['Tomatoes', 'Green Beans', 'Beetroot'],
-  },
-  {
-    id: 'f-2',
     name: 'Highland Fresh Fields',
     farmerName: 'Sunil Bandara',
     phone: '+94 71 987 6543',
     address: 'Nanu Oya Road, Blackpool',
     district: 'Nuwara Eliya',
-    distanceKm: 42.1,
-    driveTimeMin: 75,
-    rating: 4.7,
-    reviewsCount: 88,
+    distanceKm: 12.0,
+    driveTimeMin: 28,
+    rating: 4.9,
+    reviewsCount: 142,
     isVerified: true,
-    isOrganic: false,
+    isOrganic: true,
     latitude: 6.9497,
     longitude: 80.7891,
-    image: 'https://images.unsplash.com/photo-1595974482597-4b8da8879bc5?w=500&auto=format&fit=crop&q=60',
+    image: 'https://images.unsplash.com/photo-1544717302-de2939b7ef71?w=500&auto=format&fit=crop&q=80',
     crops: ['Carrots', 'Leeks', 'Potatoes'],
   },
   {
-    id: 'f-3',
-    name: 'Dambulla Harvest Valley',
-    farmerName: 'Chaminda Silva',
-    phone: '+94 76 555 1234',
-    address: 'Kurunegala Junction, Dambulla',
-    district: 'Matale',
-    distanceKm: 28.0,
-    driveTimeMin: 45,
+    id: 'f-2',
+    name: 'Perera Organic Farm',
+    farmerName: 'Kamal Perera',
+    phone: '+94 77 123 4567',
+    address: '12/A Fresh Produce Valley, Katugastota',
+    district: 'Kandy',
+    distanceKm: 18.4,
+    driveTimeMin: 35,
     rating: 4.8,
-    reviewsCount: 156,
+    reviewsCount: 98,
     isVerified: true,
     isOrganic: true,
-    latitude: 7.8742,
-    longitude: 80.6511,
-    image: 'https://images.unsplash.com/photo-1625246333195-78d9c38ad449?w=500&auto=format&fit=crop&q=60',
-    crops: ['Sweet Corn', 'Onions', 'Capsicum'],
+    latitude: 7.2906,
+    longitude: 80.6337,
+    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&auto=format&fit=crop&q=80',
+    crops: ['Tomatoes', 'Green Beans', 'Beetroot'],
+  },
+  {
+    id: 'f-3',
+    name: 'Welimada Green Agro',
+    farmerName: 'Ranjith Silva',
+    phone: '+94 77 444 8899',
+    address: 'Boralanda Road, Welimada',
+    district: 'Welimada',
+    distanceKm: 24.0,
+    driveTimeMin: 42,
+    rating: 4.9,
+    reviewsCount: 210,
+    isVerified: true,
+    isOrganic: true,
+    latitude: 6.9033,
+    longitude: 80.9022,
+    image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=500&auto=format&fit=crop&q=80',
+    crops: ['Cabbage', 'Cauliflower', 'Strawberries'],
+  },
+  {
+    id: 'f-4',
+    name: 'Matale Spice & Veggie Estate',
+    farmerName: 'Nimal Jayawardena',
+    phone: '+94 76 555 1234',
+    address: 'Kurunegala Junction, Matale',
+    district: 'Matale',
+    distanceKm: 31.0,
+    driveTimeMin: 50,
+    rating: 4.7,
+    reviewsCount: 67,
+    isVerified: true,
+    isOrganic: false,
+    latitude: 7.4675,
+    longitude: 80.6234,
+    image: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=500&auto=format&fit=crop&q=80',
+    crops: ['Sweet Corn', 'Capsicum', 'Black Pepper'],
   },
 ];
 
 interface FarmMapScreenProps {
+  initialFarmId?: string;
+  initialView?: 'map' | 'list';
   onBack: () => void;
   onSelectFarmProduct?: (cropName: string) => void;
   onChatFarmer?: (farmerPhone: string) => void;
   onOpenFarmerMatching?: () => void;
+  onOpenFarmerProfile?: (farmer: { id: string; name: string; avatar?: string; district?: string }) => void;
 }
 
 export function FarmMapScreen({
+  initialFarmId,
+  initialView = 'map',
   onBack,
   onSelectFarmProduct,
   onChatFarmer,
   onOpenFarmerMatching,
+  onOpenFarmerProfile,
 }: FarmMapScreenProps) {
-  const [activeView, setActiveView] = useState<'map' | 'list'>('list');
+  const [activeView, setActiveView] = useState<'map' | 'list'>(initialView);
+  const [mapMode, setMapMode] = useState<'street' | 'satellite'>('street');
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(MOCK_FARMS[0]);
+
+  const initialFarm = initialFarmId
+    ? MOCK_FARMS.find(
+        (f) =>
+          f.id === initialFarmId ||
+          f.id.replace('-', '') === initialFarmId.replace('-', '') ||
+          f.farmerName.toLowerCase().includes(initialFarmId.toLowerCase())
+      ) || MOCK_FARMS[0]
+    : MOCK_FARMS[0];
+
+  const [selectedFarm, setSelectedFarm] = useState<FarmLocation | null>(initialFarm);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showNoFarmsModal, setShowNoFarmsModal] = useState(false);
@@ -129,20 +165,55 @@ export function FarmMapScreen({
   };
 
   const openGoogleMapsDirections = (farm: FarmLocation) => {
-    const url = Platform.select({
-      ios: `maps:0,0?q=${farm.latitude},${farm.longitude}(${encodeURIComponent(farm.name)})`,
-      android: `geo:0,0?q=${farm.latitude},${farm.longitude}(${encodeURIComponent(farm.name)})`,
-      default: `https://www.google.com/maps/dir/?api=1&destination=${farm.latitude},${farm.longitude}`,
+    const lat = farm.latitude;
+    const lon = farm.longitude;
+    const label = encodeURIComponent(farm.name);
+    const nativeUrl = Platform.select({
+      ios: `maps:0,0?q=${label}@${lat},${lon}`,
+      android: `google.navigation:q=${lat},${lon}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`,
     });
-    if (url) {
-      Linking.openURL(url).catch(() => {
-        Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(farm.address + ' ' + farm.district)}`);
-      });
+
+    if (nativeUrl) {
+      Linking.canOpenURL(nativeUrl)
+        .then((supported) => {
+          if (supported) {
+            return Linking.openURL(nativeUrl);
+          } else {
+            return Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`);
+          }
+        })
+        .catch(() => {
+          Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`);
+        });
     }
   };
 
   const callFarmer = (phone: string) => {
     Linking.openURL(`tel:${phone}`);
+  };
+
+  const getPinCoords = (lat: number, lon: number) => {
+    const minLat = 6.80;
+    const maxLat = 7.60;
+    const minLon = 80.50;
+    const maxLon = 81.00;
+    const topPercent = ((maxLat - lat) / (maxLat - minLat)) * 65 + 16;
+    const leftPercent = ((lon - minLon) / (maxLon - minLon)) * 68 + 16;
+    return {
+      top: `${Math.min(84, Math.max(12, topPercent))}%`,
+      left: `${Math.min(84, Math.max(12, leftPercent))}%`,
+    };
+  };
+
+  const getFarmCropEmoji = (crops: string[]) => {
+    const first = crops[0]?.toLowerCase() || '';
+    if (first.includes('carrot') || first.includes('beet')) return '🥕';
+    if (first.includes('tomato')) return '🍅';
+    if (first.includes('corn')) return '🌽';
+    if (first.includes('cabbage') || first.includes('leek')) return '🥬';
+    if (first.includes('strawberr')) return '🍓';
+    return '🌱';
   };
 
   const filteredFarms = MOCK_FARMS.filter((farm) => {
@@ -152,7 +223,8 @@ export function FarmMapScreen({
     if (
       searchQuery.trim() &&
       !farm.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
-      !farm.district.toLowerCase().includes(searchQuery.toLowerCase())
+      !farm.district.toLowerCase().includes(searchQuery.toLowerCase()) &&
+      !farm.farmerName.toLowerCase().includes(searchQuery.toLowerCase())
     ) {
       return false;
     }
@@ -163,7 +235,7 @@ export function FarmMapScreen({
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Top Search & Filter Bar (Matching Figma Screens 8 & 9) */}
+      {/* Top Search & Filter Bar */}
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={12} style={styles.navBtn}>
           <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
@@ -177,7 +249,7 @@ export function FarmMapScreen({
           </Svg>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search farm name or region..."
+            placeholder="Search farm, district or grower..."
             placeholderTextColor="#94A3B8"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -196,17 +268,17 @@ export function FarmMapScreen({
       {/* Toggle View Tabs: Map vs List */}
       <View style={styles.viewToggleRow}>
         <Pressable
-          style={[styles.toggleBtn, activeView === 'list' && styles.toggleBtnActive]}
-          onPress={() => setActiveView('list')}>
-          <Text style={[styles.toggleBtnText, activeView === 'list' && styles.toggleBtnTextActive]}>
-            📋 Farms in Your Range ({filteredFarms.length})
-          </Text>
-        </Pressable>
-        <Pressable
           style={[styles.toggleBtn, activeView === 'map' && styles.toggleBtnActive]}
           onPress={() => setActiveView('map')}>
           <Text style={[styles.toggleBtnText, activeView === 'map' && styles.toggleBtnTextActive]}>
-            🗺️ Interactive Map
+            🗺️ Live GPS Map ({filteredFarms.length})
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.toggleBtn, activeView === 'list' && styles.toggleBtnActive]}
+          onPress={() => setActiveView('list')}>
+          <Text style={[styles.toggleBtnText, activeView === 'list' && styles.toggleBtnTextActive]}>
+            📋 Farms Directory ({filteredFarms.length})
           </Text>
         </Pressable>
       </View>
@@ -214,67 +286,117 @@ export function FarmMapScreen({
       {/* Main View Area */}
       {activeView === 'map' ? (
         <View style={styles.mapCanvas}>
-          {/* Simulated High-Res Map Grid Graphic */}
+          {/* Real Map Photographic / Cartographic Layer with Interactive Zoom */}
           <View style={styles.mapGraphicContainer}>
-            {/* SVG Roads & Terrain overlay */}
-            <Svg width="100%" height="100%" viewBox="0 0 400 500" style={StyleSheet.absoluteFill}>
-              {/* Grid map tiles */}
-              <Path d="M 0 120 L 400 120 M 0 260 L 400 260 M 0 380 L 400 380" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
-              <Path d="M 120 0 L 120 500 M 260 0 L 260 500" stroke="#E2E8F0" strokeWidth={1} strokeDasharray="4,4" />
-              {/* River / Road */}
-              <Path d="M -20 180 Q 140 160 200 240 T 420 310" stroke="#93C5FD" strokeWidth={14} fill="none" opacity={0.4} />
-              {/* Main Highway Route */}
-              <Path d="M 30 420 C 100 350 120 280 200 230 C 260 190 310 130 330 60" stroke="#22C55E" strokeWidth={5} fill="none" strokeLinecap="round" />
-            </Svg>
+            <Image
+              source={{
+                uri:
+                  mapMode === 'satellite'
+                    ? 'https://images.unsplash.com/photo-1524661135-423995f22d0b?w=1200&auto=format&fit=crop&q=80'
+                    : 'https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=1200&auto=format&fit=crop&q=80',
+              }}
+              style={[
+                styles.realMapImage,
+                { transform: [{ scale: zoomLevel }] },
+              ]}
+              contentFit="cover"
+            />
 
-            {/* Farm Pin 1 */}
-            <Pressable
-              style={[styles.mapPin, { top: 60, left: 310 }]}
-              onPress={() => setSelectedFarm(MOCK_FARMS[0])}>
-              <View style={[styles.pinBubble, selectedFarm?.id === 'f-1' && styles.pinBubbleActive]}>
-                <Text style={styles.pinEmoji}>🌱</Text>
-              </View>
-              <View style={styles.pinStem} />
-            </Pressable>
+            {/* Road Corridor and Route Lines */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+              <Svg width="100%" height="100%" viewBox="0 0 400 500" style={StyleSheet.absoluteFill}>
+                {/* Major Highways connecting Central Province Farms */}
+                <Path d="M 110 50 L 140 160 L 220 240 L 290 350 L 330 450" stroke="#F59E0B" strokeWidth={5} strokeLinecap="round" opacity={0.85} />
+                <Path d="M 70 240 L 220 240 L 340 260" stroke="#3B82F6" strokeWidth={4} strokeLinecap="round" opacity={0.75} />
+              </Svg>
+            </View>
 
-            {/* Farm Pin 2 */}
-            <Pressable
-              style={[styles.mapPin, { top: 220, left: 180 }]}
-              onPress={() => setSelectedFarm(MOCK_FARMS[1])}>
-              <View style={[styles.pinBubble, selectedFarm?.id === 'f-2' && styles.pinBubbleActive]}>
-                <Text style={styles.pinEmoji}>🥕</Text>
-              </View>
-              <View style={styles.pinStem} />
-            </Pressable>
+            {/* Farm Pins with exact Sri Lanka coordinates */}
+            {filteredFarms.map((farm) => {
+              const coords = getPinCoords(farm.latitude, farm.longitude);
+              const isSelected = selectedFarm?.id === farm.id;
+              return (
+                <Pressable
+                  key={farm.id}
+                  style={[
+                    styles.mapPin,
+                    { top: coords.top as any, left: coords.left as any },
+                  ]}
+                  onPress={() => setSelectedFarm(farm)}>
+                  {/* Pin Callout Bubble */}
+                  <View style={[styles.pinCallout, isSelected && styles.pinCalloutActive]}>
+                    <Text style={[styles.pinCalloutName, isSelected && styles.pinCalloutNameActive]} numberOfLines={1}>
+                      {farm.farmerName.split(' ')[0]}
+                    </Text>
+                    <Text style={styles.pinCalloutDist}>{farm.distanceKm}km</Text>
+                  </View>
+                  <View style={[styles.pinBubble, isSelected && styles.pinBubbleActive]}>
+                    <Text style={styles.pinEmoji}>{getFarmCropEmoji(farm.crops)}</Text>
+                  </View>
+                  <View style={[styles.pinStem, isSelected && styles.pinStemActive]} />
+                </Pressable>
+              );
+            })}
 
-            {/* Farm Pin 3 */}
-            <Pressable
-              style={[styles.mapPin, { top: 350, left: 70 }]}
-              onPress={() => setSelectedFarm(MOCK_FARMS[2])}>
-              <View style={[styles.pinBubble, selectedFarm?.id === 'f-3' && styles.pinBubbleActive]}>
-                <Text style={styles.pinEmoji}>🌽</Text>
-              </View>
-              <View style={styles.pinStem} />
-            </Pressable>
-
-            {/* User Location Marker (Blue Dot) */}
-            <View style={[styles.userDotContainer, { top: 400, left: 35 }]}>
+            {/* User Live GPS Location Marker */}
+            <View style={[styles.userDotContainer, { top: '68%', left: '40%' }]}>
               <View style={styles.userPulse} />
               <View style={styles.userDot} />
+              <View style={styles.userCallout}>
+                <Text style={styles.userCalloutText}>📍 You (Central Hub)</Text>
+              </View>
             </View>
           </View>
 
-          {/* Bottom Floating Direction / Farm Sheet (Matching Figma Screens 11 & 12) */}
+          {/* Top Floating Live GPS & Google Maps Launcher Bar */}
+          <View style={styles.mapTopFloatingBar}>
+            <View style={styles.gpsLiveBadge}>
+              <View style={styles.gpsLiveIndicator} />
+              <Text style={styles.gpsLiveText}>
+                Sri Lanka GPS • {selectedFarm ? `${selectedFarm.latitude.toFixed(3)}°N, ${selectedFarm.longitude.toFixed(3)}°E` : 'Active'}
+              </Text>
+            </View>
+
+            <Pressable
+              style={styles.openGoogleMapsHeaderBtn}
+              onPress={() => openGoogleMapsDirections(selectedFarm || MOCK_FARMS[0])}>
+              <Text style={styles.googleMapsHeaderIcon}>🚀</Text>
+              <Text style={styles.googleMapsHeaderText}>Real Google Maps</Text>
+            </Pressable>
+          </View>
+
+          {/* Floating Controls: Street/Satellite Toggle & Zoom */}
+          <View style={styles.mapFloatingControls}>
+            <Pressable
+              style={[styles.floatingControlBtn, mapMode === 'satellite' && styles.floatingControlBtnActive]}
+              onPress={() => setMapMode(mapMode === 'satellite' ? 'street' : 'satellite')}>
+              <Text style={styles.floatingControlIcon}>{mapMode === 'satellite' ? '🗺️' : '🛰️'}</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.floatingControlBtn}
+              onPress={() => setZoomLevel((prev) => Math.min(prev + 0.25, 2.0))}>
+              <Text style={styles.floatingControlIcon}>➕</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.floatingControlBtn}
+              onPress={() => setZoomLevel((prev) => Math.max(prev - 0.25, 1.0))}>
+              <Text style={styles.floatingControlIcon}>➖</Text>
+            </Pressable>
+          </View>
+
+          {/* Bottom Floating Farm Details Sheet */}
           {selectedFarm && (
             <View style={styles.bottomFarmSheet}>
-              {/* Transit Route ETA Banner */}
+              {/* Route ETA Banner */}
               <View style={styles.etaBanner}>
                 <View style={styles.etaBadge}>
                   <Text style={styles.etaText}>
                     ⚡ {selectedFarm.driveTimeMin} min ({selectedFarm.distanceKm} km)
                   </Text>
                 </View>
-                <Text style={styles.etaSub}>Fastest route via A1 / Katugastota</Text>
+                <Text style={styles.etaSub}>Fastest route via Sri Lanka A1 / A5</Text>
               </View>
 
               {/* Farm Details Row */}
@@ -288,8 +410,8 @@ export function FarmMapScreen({
                   <Text style={styles.sheetTitle} numberOfLines={1}>
                     {selectedFarm.name}
                   </Text>
-                  <Text style={styles.sheetAddress} numberOfLines={1}>
-                    📍 {selectedFarm.address}, {selectedFarm.district}
+                  <Text style={styles.sheetFarmerSub} numberOfLines={1}>
+                    Grower: {selectedFarm.farmerName} • {selectedFarm.district}
                   </Text>
                   <Text style={styles.sheetRating}>
                     ★ {selectedFarm.rating} ({selectedFarm.reviewsCount} reviews) • {selectedFarm.isOrganic ? '🌱 Organic' : 'Conventional'}
@@ -297,37 +419,47 @@ export function FarmMapScreen({
                 </View>
               </View>
 
-              {/* Action Buttons: Call, Chat, Directions */}
+              {/* Action Buttons Row */}
               <View style={styles.sheetActionsRow}>
+                {/* Farmer Profile & Rate Button */}
+                <Pressable
+                  style={styles.sheetProfileBtn}
+                  onPress={() => {
+                    if (onOpenFarmerProfile) {
+                      onOpenFarmerProfile({
+                        id: selectedFarm.id,
+                        name: selectedFarm.farmerName || selectedFarm.name,
+                        avatar: selectedFarm.image,
+                        district: selectedFarm.district,
+                      });
+                    }
+                  }}>
+                  <Text style={styles.sheetProfileBtnIcon}>👨‍🌾</Text>
+                  <Text style={styles.sheetProfileBtnText}>Profile & Rate</Text>
+                </Pressable>
+
+                {/* Call Farmer */}
                 <Pressable
                   style={styles.sheetActionBtn}
                   onPress={() => callFarmer(selectedFarm.phone)}>
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <Path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </Svg>
                   <Text style={styles.sheetActionText}>Call</Text>
                 </Pressable>
 
-                <Pressable
-                  style={styles.sheetActionBtn}
-                  onPress={() => onChatFarmer?.(selectedFarm.phone)}>
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </Svg>
-                  <Text style={styles.sheetActionText}>Chat</Text>
-                </Pressable>
-
+                {/* Launch Real Google Maps */}
                 <Pressable
                   style={styles.sheetDirectionsBtn}
                   onPress={() => openGoogleMapsDirections(selectedFarm)}>
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <Path d="M3 11l19-9-9 19-2-8-8-2z" />
                   </Svg>
                   <Text style={styles.sheetDirectionsText}>Directions</Text>
                 </Pressable>
               </View>
 
-              {/* Save Farm To List button */}
+              {/* Save Farm Button */}
               <Pressable
                 style={styles.saveFarmBtn}
                 onPress={() => toggleSaveFarm(selectedFarm.id)}>
@@ -687,16 +819,140 @@ const styles = StyleSheet.create({
   mapCanvas: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0F172A',
   },
   mapGraphicContainer: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#0F172A',
+    overflow: 'hidden',
+  },
+  realMapImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  mapTopFloatingBar: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  gpsLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  gpsLiveIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+  },
+  gpsLiveText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  openGoogleMapsHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#1D4ED8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  googleMapsHeaderIcon: {
+    fontSize: 12,
+  },
+  googleMapsHeaderText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  mapFloatingControls: {
+    position: 'absolute',
+    top: 54,
+    right: 12,
+    gap: 8,
+    zIndex: 10,
+  },
+  floatingControlBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  floatingControlBtnActive: {
+    backgroundColor: '#DCFCE7',
+    borderColor: '#86EFAC',
+  },
+  floatingControlIcon: {
+    fontSize: 16,
   },
   mapPin: {
     position: 'absolute',
     alignItems: 'center',
+    zIndex: 5,
+  },
+  pinCallout: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  pinCalloutActive: {
+    backgroundColor: '#15803D',
+    borderColor: '#15803D',
+  },
+  pinCalloutName: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  pinCalloutNameActive: {
+    color: '#FFFFFF',
+  },
+  pinCalloutDist: {
+    fontSize: 9,
+    color: '#64748B',
+    fontWeight: '600',
   },
   pinBubble: {
     width: 36,
@@ -726,19 +982,24 @@ const styles = StyleSheet.create({
     height: 8,
     backgroundColor: '#15803D',
   },
+  pinStemActive: {
+    backgroundColor: '#15803D',
+    width: 3.5,
+  },
   userDotContainer: {
     position: 'absolute',
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 6,
   },
   userPulse: {
     position: 'absolute',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(59, 130, 246, 0.4)',
   },
   userDot: {
     width: 12,
@@ -747,6 +1008,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
     borderWidth: 2,
     borderColor: '#FFFFFF',
+  },
+  userCallout: {
+    position: 'absolute',
+    top: -24,
+    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  userCalloutText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   bottomFarmSheet: {
     position: 'absolute',
@@ -758,11 +1034,12 @@ const styles = StyleSheet.create({
     padding: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.15,
     shadowRadius: 10,
-    elevation: 6,
+    elevation: 8,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    zIndex: 20,
   },
   etaBanner: {
     flexDirection: 'row',
@@ -810,6 +1087,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0F172A',
   },
+  sheetFarmerSub: {
+    fontSize: 12,
+    color: '#475569',
+    marginTop: 2,
+    fontWeight: '600',
+  },
   sheetAddress: {
     fontSize: 12,
     color: '#64748B',
@@ -823,11 +1106,31 @@ const styles = StyleSheet.create({
   },
   sheetActionsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginBottom: 10,
   },
+  sheetProfileBtn: {
+    flex: 1.2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    gap: 4,
+  },
+  sheetProfileBtnIcon: {
+    fontSize: 13,
+  },
+  sheetProfileBtnText: {
+    color: '#1D4ED8',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   sheetActionBtn: {
-    flex: 1,
+    flex: 0.9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -836,26 +1139,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
     borderColor: '#BBF7D0',
-    gap: 6,
+    gap: 4,
   },
   sheetActionText: {
     color: '#2E7D32',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   sheetDirectionsBtn: {
-    flex: 1.3,
+    flex: 1.2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: '#2E7D32',
-    gap: 6,
+    gap: 5,
   },
   sheetDirectionsText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   saveFarmBtn: {

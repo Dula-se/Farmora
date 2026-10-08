@@ -18,23 +18,32 @@ import {
   fetchProduceListings,
   toggleFavouriteFarmApi,
   ApiProduceItem,
+  getStoredUser,
+  ApiUser,
 } from '@/services/api';
 import { useCart } from '@/context/cart-context';
+import { RatingService, RatingReview } from '@/services/rating-service';
 
 interface FarmerPublicProfileScreenProps {
   farmerId?: string;
   farmerName?: string;
+  farmerAvatar?: string;
   onBack?: () => void;
   onSelectProduce?: (produce: ApiProduceItem) => void;
   onOpenChat?: (farmer: { id: string; name: string }) => void;
+  onRateFarmer?: (farmer: { id: string; name: string; avatar?: string }) => void;
+  onViewOnMap?: (farmer: { id: string; name: string }) => void;
 }
 
 export function FarmerPublicProfileScreen({
   farmerId = 'kamal-gunawardana',
   farmerName = 'Kamal Gunawardana',
+  farmerAvatar,
   onBack,
   onSelectProduce,
   onOpenChat,
+  onRateFarmer,
+  onViewOnMap,
 }: FarmerPublicProfileScreenProps) {
   const { addToCart } = useCart();
   const [profile, setProfile] = useState<any>(null);
@@ -42,9 +51,58 @@ export function FarmerPublicProfileScreen({
   const [isFollowing, setIsFollowing] = useState(false);
   const [featuredProducts, setFeaturedProducts] = useState<ApiProduceItem[]>([]);
 
+  // Rating and reviews state
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [reviews, setReviews] = useState<RatingReview[]>([]);
+  const [myReview, setMyReview] = useState<RatingReview | null>(null);
+
   useEffect(() => {
     loadProfile();
+    loadFarmerReviews();
   }, [farmerId]);
+
+  const loadFarmerReviews = async () => {
+    try {
+      const [revs, u] = await Promise.all([
+        RatingService.fetchReviewsForTarget(farmerId),
+        getStoredUser(),
+      ]);
+      setReviews(revs);
+      setCurrentUser(u);
+      const myId = u?.id || u?._id;
+      const found = revs.find(
+        (r) =>
+          (myId && r.authorId === myId) ||
+          (u?.fullName && r.authorName === u.fullName)
+      );
+      setMyReview(found || null);
+    } catch (err) {
+      console.warn('Error loading farmer reviews:', err);
+    }
+  };
+
+  const handleDeleteMyReview = (reviewId: string) => {
+    Alert.alert(
+      'Delete Rating? 🗑️',
+      'Are you sure you want to delete your rating for this farmer?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await RatingService.deleteReview(reviewId);
+              Alert.alert('Deleted', 'Your review has been removed.');
+              loadFarmerReviews();
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to delete review.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const loadProfile = async () => {
     setLoading(true);
@@ -245,14 +303,18 @@ export function FarmerPublicProfileScreen({
 
           <View style={styles.ratingRow}>
             <Text style={styles.ratingStar}>★</Text>
-            <Text style={styles.ratingScore}>{profile?.rating || 4.9}</Text>
+            <Text style={styles.ratingScore}>
+              {reviews.length > 0
+                ? RatingService.computeStats(reviews).average
+                : profile?.rating || 4.9}
+            </Text>
             <Text style={styles.reviewsCount}>
-              ({profile?.reviewsCount || 124}+ verified reviews)
+              ({reviews.length || profile?.reviewsCount || 124}+ verified reviews)
             </Text>
           </View>
         </View>
 
-        {/* Action Buttons: Call, Chat, Follow */}
+        {/* Action Buttons: Call, Chat, Follow, Rate */}
         <View style={styles.actionRow}>
           <Pressable
             style={({ pressed }) => [
@@ -292,7 +354,30 @@ export function FarmerPublicProfileScreen({
                 styles.actionBtnText,
                 isFollowing && styles.actionBtnTextActive,
               ]}>
-              {isFollowing ? 'Following' : 'Follow Farm'}
+              {isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              myReview && styles.actionBtnActive,
+              pressed && styles.actionBtnPressed,
+            ]}
+            onPress={() =>
+              onRateFarmer?.({
+                id: farmerId,
+                name: profile?.fullName || farmerName,
+                avatar: farmerAvatar || profile?.avatarUrl,
+              })
+            }>
+            <Text style={styles.actionBtnIcon}>⭐</Text>
+            <Text
+              style={[
+                styles.actionBtnText,
+                myReview && styles.actionBtnTextActive,
+              ]}>
+              {myReview ? 'Edit Rate' : 'Rate'}
             </Text>
           </Pressable>
         </View>
@@ -303,10 +388,19 @@ export function FarmerPublicProfileScreen({
           <Text style={styles.aboutText}>{profile?.bio}</Text>
         </View>
 
-        {/* Farm Locations Preview */}
+        {/* Farm Locations Preview (REAL MAP LINK) */}
         <View style={styles.cardSection}>
           <Text style={styles.sectionHeader}>FARM LOCATIONS</Text>
-          <View style={styles.locationCard}>
+          <Pressable
+            style={styles.locationCard}
+            onPress={() => {
+              if (onViewOnMap) {
+                onViewOnMap({ id: farmerId, name: profile?.fullName || farmerName });
+              } else {
+                const addr = profile?.farmLocations?.[0] || 'Hakgala Road, Nuwara Eliya';
+                Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`);
+              }
+            }}>
             <Text style={styles.locationPinIcon}>📍</Text>
             <View style={{ flex: 1 }}>
               <Text style={styles.locationTitle}>
@@ -317,8 +411,11 @@ export function FarmerPublicProfileScreen({
                   profile?.farmLocations?.[0] ||
                   'Hakgala Road, Nuwara Eliya'}
               </Text>
+              <Text style={styles.locationMapLink}>
+                🗺️ View on Real Map & GPS Navigation ›
+              </Text>
             </View>
-          </View>
+          </Pressable>
         </View>
 
         {/* Quick Stats Grid */}
@@ -406,26 +503,155 @@ export function FarmerPublicProfileScreen({
           </ScrollView>
         </View>
 
-        {/* Reviews Section */}
+        {/* Verified Reviews Section (Powered by RatingService) */}
         <View style={styles.cardSection}>
-          <Text style={styles.sectionHeader}>REVIEWS</Text>
-          {sampleReviews.map((rev) => (
-            <View key={rev.id} style={styles.reviewItem}>
-              <View style={styles.reviewHeader}>
-                <View style={styles.reviewerAvatar}>
-                  <Text style={styles.reviewerInitial}>{rev.name[0]}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.reviewerName}>{rev.name}</Text>
-                  <Text style={styles.reviewDate}>{rev.date}</Text>
-                </View>
-                <View style={styles.reviewStars}>
-                  <Text style={styles.reviewStarIcon}>★★★★★</Text>
-                </View>
-              </View>
-              <Text style={styles.reviewText}>{rev.text}</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={styles.sectionHeader}>VERIFIED REVIEWS ({reviews.length})</Text>
+            <Pressable
+              onPress={() =>
+                onRateFarmer?.({
+                  id: farmerId,
+                  name: profile?.fullName || farmerName,
+                  avatar: farmerAvatar || profile?.avatarUrl,
+                })
+              }
+              style={{
+                backgroundColor: myReview ? '#EFF6FF' : '#1E5E3A',
+                borderWidth: myReview ? 1 : 0,
+                borderColor: '#BFDBFE',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+              }}>
+              <Text
+                style={{
+                  color: myReview ? '#1D4ED8' : '#FFFFFF',
+                  fontSize: 12,
+                  fontWeight: '700',
+                }}>
+                {myReview ? '✏️ Edit My Rating' : '⭐ Rate Farmer'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {reviews.length === 0 ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ fontSize: 28 }}>🌱</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A', marginTop: 8 }}>
+                No reviews yet
+              </Text>
+              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 4, textAlign: 'center' }}>
+                Be the first to rate your produce procurement experience with this farmer!
+              </Text>
             </View>
-          ))}
+          ) : (
+            reviews.map((rev) => {
+              const isMine = myReview && rev.id === myReview.id;
+              const displayDate = rev.createdAt
+                ? new Date(rev.createdAt).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : 'Recent';
+
+              return (
+                <View
+                  key={rev.id}
+                  style={[
+                    styles.reviewItem,
+                    isMine && { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' },
+                  ]}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewerAvatar}>
+                      <Text style={styles.reviewerInitial}>
+                        {rev.authorName ? rev.authorName[0] : '👤'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.reviewerName}>{rev.authorName}</Text>
+                        {isMine && (
+                          <View
+                            style={{
+                              backgroundColor: '#DCFCE7',
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                            }}>
+                            <Text style={{ fontSize: 9, fontWeight: '800', color: '#15803D' }}>
+                              👑 You
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.reviewDate}>{displayDate}</Text>
+                    </View>
+                    <View style={styles.reviewStars}>
+                      <Text style={{ fontSize: 12, color: '#EAB308' }}>
+                        {'★'.repeat(rev.overallRating || 5)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {rev.tags && rev.tags.length > 0 && (
+                    <Text style={{ fontSize: 11, color: '#1E5E3A', fontWeight: '700', marginBottom: 4 }}>
+                      {rev.tags.join(' • ')}
+                    </Text>
+                  )}
+                  <Text style={styles.reviewText}>{rev.comment}</Text>
+
+                  {/* Edit and Delete Actions if it is the current user's review */}
+                  {isMine && (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'flex-end',
+                        gap: 8,
+                        marginTop: 10,
+                        paddingTop: 8,
+                        borderTopWidth: 1,
+                        borderTopColor: '#DCFCE7',
+                      }}>
+                      <Pressable
+                        style={{
+                          backgroundColor: '#EFF6FF',
+                          borderWidth: 1,
+                          borderColor: '#BFDBFE',
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 8,
+                        }}
+                        onPress={() =>
+                          onRateFarmer?.({
+                            id: farmerId,
+                            name: profile?.fullName || farmerName,
+                            avatar: farmerAvatar || profile?.avatarUrl,
+                          })
+                        }>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
+                          ✏️ Edit Rating
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={{
+                          backgroundColor: '#FFF1F2',
+                          borderWidth: 1,
+                          borderColor: '#FECDD3',
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 8,
+                        }}
+                        onPress={() => handleDeleteMyReview(rev.id)}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#E11D48' }}>
+                          🗑️ Delete Rating
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -647,6 +873,12 @@ const styles = StyleSheet.create({
   locationAddress: {
     fontSize: 12,
     color: '#64748B',
+  },
+  locationMapLink: {
+    fontSize: 11,
+    color: '#166534',
+    fontWeight: '700',
+    marginTop: 4,
   },
   statsGrid: {
     flexDirection: 'row',

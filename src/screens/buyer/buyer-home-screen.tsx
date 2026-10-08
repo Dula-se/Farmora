@@ -39,6 +39,14 @@ interface BuyerHomeScreenProps {
   onOpenProductScanner?: () => void;
   onOpenWishlist?: () => void;
   onOpenCart?: () => void;
+  onSelectFarmer?: (farmer: {
+    id: string;
+    name: string;
+    avatar?: string;
+    location?: string;
+    rating?: number;
+    district?: string;
+  }) => void;
 }
 
 const NEARBY_FARMERS = [
@@ -84,6 +92,7 @@ export function BuyerHomeScreen({
   onOpenProductScanner,
   onOpenWishlist,
   onOpenCart,
+  onSelectFarmer,
 }: BuyerHomeScreenProps) {
   const { totalCount: cartCount, addToCart } = useCart();
   const [produceList, setProduceList] = useState<ApiProduceItem[]>([]);
@@ -527,7 +536,13 @@ export function BuyerHomeScreen({
               <Pressable
                 key={farmer.id}
                 style={styles.farmerCard}
-                onPress={onOpenFarmsMap}>
+                onPress={() => {
+                  if (onSelectFarmer) {
+                    onSelectFarmer(farmer);
+                  } else if (onOpenFarmsMap) {
+                    onOpenFarmsMap();
+                  }
+                }}>
                 <Image
                   source={{ uri: farmer.avatar }}
                   style={styles.farmerAvatar}

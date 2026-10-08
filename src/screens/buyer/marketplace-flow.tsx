@@ -92,7 +92,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
   const [activeTab, setActiveTab] = useState<BuyerTab>('home');
   const [selectedCategory, setSelectedCategory] = useState({ id: 'vegetables', name: 'Vegetables' });
   const [selectedProduct, setSelectedProduct] = useState<ApiProduceItem | null>(null);
-  const [selectedFarmer, setSelectedFarmer] = useState<{ id: string; name: string }>({
+  const [selectedFarmer, setSelectedFarmer] = useState<{ id: string; name: string; avatar?: string }>({
     id: 'kamal-gunawardana',
     name: 'Kamal Gunawardana',
   });
@@ -239,6 +239,14 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenOrders={() => setCurrentView('buyer-orders')}
             onOpenChats={() => setCurrentView('messages')}
             onOpenProfile={() => setCurrentView('profile')}
+            onSelectFarmer={(farmer) => {
+              setSelectedFarmer({
+                id: farmer.id,
+                name: farmer.name,
+                avatar: farmer.avatar,
+              });
+              setCurrentView('farmer-public-profile');
+            }}
           />
         )}
 
@@ -341,11 +349,21 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
 
         {currentView === 'farm-map' && (
           <FarmMapScreen
+            initialFarmId={selectedFarmer?.id}
+            initialView="map"
             onBack={() => setCurrentView('home')}
             onChatFarmer={(phone) => {
-              handleStartChatWithFarmer('Highland Plots Farmer');
+              handleStartChatWithFarmer(selectedFarmer?.id || 'f-1', selectedFarmer?.name || 'Farmer');
             }}
             onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
+            onOpenFarmerProfile={(farm) => {
+              setSelectedFarmer({
+                id: farm.id,
+                name: farm.name,
+                avatar: farm.avatar,
+              });
+              setCurrentView('farmer-public-profile');
+            }}
           />
         )}
 
@@ -550,10 +568,21 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <FarmerPublicProfileScreen
             farmerId={selectedFarmer.id}
             farmerName={selectedFarmer.name}
-            onBack={() => setCurrentView('favourite-farms')}
+            farmerAvatar={selectedFarmer.avatar}
+            onBack={() => setCurrentView('home')}
             onSelectProduce={handleSelectProduct}
             onOpenChat={(f) => {
-              handleStartChatWithFarmer(f.name);
+              handleStartChatWithFarmer(f.id, f.name);
+            }}
+            onRateFarmer={(f) => {
+              setSelectedFarmer({ id: f.id, name: f.name, avatar: f.avatar });
+              setCurrentView('rate-experience');
+            }}
+            onViewOnMap={(f) => {
+              if (f?.id) {
+                setSelectedFarmer((prev) => ({ ...prev, id: f.id, name: f.name || prev.name }));
+              }
+              setCurrentView('farm-map');
             }}
           />
         )}
