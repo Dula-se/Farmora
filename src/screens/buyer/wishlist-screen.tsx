@@ -13,22 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { ApiProduceItem, fetchWishlist, toggleWishlist } from '@/services/api';
+import { ApiProduceItem } from '@/services/api';
+import { WishlistService, WishlistItem } from '@/services/wishlist-service';
 import { useCart } from '@/context/cart-context';
-
-export interface WishlistItem {
-  id: string;
-  produceId: string;
-  title: string;
-  pricePerUnit: number;
-  unit: string;
-  farmerName: string;
-  locationCity: string;
-  image: string;
-  inStock: boolean;
-  category: string;
-  organic: boolean;
-}
 
 const DEFAULT_WISHLIST_ITEMS: WishlistItem[] = [
   {
@@ -87,7 +74,7 @@ const DEFAULT_WISHLIST_ITEMS: WishlistItem[] = [
 
 interface WishlistScreenProps {
   onBack: () => void;
-  onSelectProduct?: (produceId: string) => void;
+  onSelectProduct?: (item: WishlistItem) => void;
   onAddToCart?: (item: WishlistItem) => void;
   onViewCart?: () => void;
 }
@@ -99,53 +86,31 @@ export function WishlistScreen({
   onViewCart,
 }: WishlistScreenProps) {
   const { addToCart, totalCount: cartTotalCount } = useCart();
-  const [items, setItems] = useState<WishlistItem[]>(DEFAULT_WISHLIST_ITEMS);
-  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<WishlistItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddedModal, setShowAddedModal] = useState(false);
   const [addedItemTitle, setAddedItemTitle] = useState('');
 
   useEffect(() => {
-    const loadWishlist = async () => {
-      setLoading(true);
-      try {
-        const liveItems = await fetchWishlist();
-        if (liveItems && liveItems.length > 0) {
-          const mapped: WishlistItem[] = liveItems.map((wi: any) => {
-            const p = wi.produce || {};
-            return {
-              id: wi.id || wi.produceId,
-              produceId: wi.produceId,
-              title: p.title || 'Fresh Crop',
-              pricePerUnit: p.pricePerUnit || 250,
-              unit: p.unit || 'kg',
-              farmerName: p.farmerName || 'Local Farmer',
-              locationCity: p.locationCity || 'Central Province',
-              image: p.images?.[0] || 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400&auto=format&fit=crop&q=80',
-              inStock: (p.availableQuantity || 0) > 0,
-              category: p.category || 'vegetables',
-              organic: Boolean(p.isOrganic),
-            };
-          });
-          setItems(mapped);
-        }
-      } catch {
-        // Keep defaults on unauthenticated preview
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadWishlist();
+    // 1. Subscribe to real-time changes across screens
+    const unsub = WishlistService.subscribe((updatedItems) => {
+      setItems(updatedItems);
+      setLoading(false);
+    });
+
+    // 2. Load from storage & background API sync
+    WishlistService.getWishlist().then((res) => {
+      setItems(res);
+      setLoading(false);
+    });
+
+    return () => unsub();
   }, []);
 
   const handleRemove = async (id: string, produceId?: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id && item.produceId !== id));
-    if (produceId || id) {
-      try {
-        await toggleWishlist(produceId || id);
-      } catch {
-        // Silent catch
-      }
-    }
+    const target = produceId || id;
+    const updated = await WishlistService.removeFromWishlist(target);
+    setItems(updated);
   };
 
   const handleAddToCart = (item: WishlistItem) => {
@@ -224,7 +189,7 @@ export function WishlistScreen({
               <Pressable
                 key={item.id}
                 style={styles.card}
-                onPress={() => onSelectProduct?.(item.produceId)}>
+                onPress={() => onSelectProduct?.(item)}>
                 {/* Product Thumbnail */}
                 <View style={styles.imageBox}>
                   <Image

@@ -74,12 +74,23 @@ export function MessagesListScreen({
       return;
     }
 
-    // Sync self into Firestore directory
+    const myIds = [user.id, user._id].filter(Boolean) as string[];
+    const primaryId = myIds[0] || '';
+
+    // 1. Instant 0ms load: Show cached conversations immediately
+    try {
+      const cached = await FirestoreChatService.getCachedConversations(primaryId);
+      if (cached && cached.length > 0) {
+        setConversations(cached);
+        setLoading(false);
+      }
+    } catch {}
+
+    // 2. Sync self into Firestore directory non-blocking
     FirestoreChatService.syncUserToFirestore(user);
 
-    const myId = user.id || user._id || '';
-
-    const unsub = FirestoreChatService.listenToConversations(myId, (convs) => {
+    // 3. Real-time Firestore listener with automatic JS sorting & auto-caching
+    const unsub = FirestoreChatService.listenToConversations(myIds, (convs) => {
       setConversations(convs);
       setLoading(false);
     });

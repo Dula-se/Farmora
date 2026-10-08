@@ -39,7 +39,8 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
     try {
       const u = await getStoredUser();
       setCurrentUser(u);
-      const data = await RatingService.fetchReviewsForTarget(targetId);
+      const targetIds = [product.farmerId, (product as any)._id, product.id, targetId].filter(Boolean) as string[];
+      const data = await RatingService.fetchReviewsForTarget(targetIds, product.farmerName);
       setReviews(data);
     } catch (e) {
       console.warn('Failed to load reviews:', e);

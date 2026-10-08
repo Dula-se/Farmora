@@ -39,6 +39,7 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, storage } from '@/config/firebase';
 import { getStoredUser, ApiUser, fetchProduceListings } from './api';
 
@@ -295,57 +296,132 @@ export const FirestoreChatService = {
     return convId;
   },
 
+  /** Cache conversations locally for instant 0ms mount */
+  async cacheConversations(userId: string, convs: FirestoreConversation[]): Promise<void> {
+    try {
+      await AsyncStorage.setItem(`@famora_convs_cache_v2_${userId}`, JSON.stringify(convs));
+    } catch {}
+  },
+
+  /** Get cached conversations */
+  async getCachedConversations(userId: string): Promise<FirestoreConversation[]> {
+    try {
+      const raw = await AsyncStorage.getItem(`@famora_convs_cache_v2_${userId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /** Cache messages locally for instant conversation open */
+  async cacheMessages(conversationId: string, messages: FirestoreMessage[]): Promise<void> {
+    try {
+      await AsyncStorage.setItem(`@famora_msgs_cache_v2_${conversationId}`, JSON.stringify(messages));
+    } catch {}
+  },
+
+  /** Get cached messages */
+  async getCachedMessages(conversationId: string): Promise<FirestoreMessage[]> {
+    try {
+      const raw = await AsyncStorage.getItem(`@famora_msgs_cache_v2_${conversationId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
   /**
    * Listen to all conversations the user is in.
+   * Accepts a single userId or array of user IDs (e.g. mongo id + custom id).
+   * Note: We avoid combining array-contains with orderBy('updatedAt') directly in the Firestore query
+   * because that requires a composite index. Sorting in JS guarantees instant delivery without index errors.
    */
   listenToConversations(
-    userId: string,
+    userIdOrIds: string | string[],
     onUpdate: (convs: FirestoreConversation[]) => void
   ): () => void {
-    const q = query(
-      collection(db, 'conversations'),
-      where('participants', 'array-contains', userId),
-      orderBy('updatedAt', 'desc')
-    );
+    const rawIds = Array.isArray(userIdOrIds) ? userIdOrIds : [userIdOrIds];
+    const ids = Array.from(new Set(rawIds.filter(Boolean)));
+    if (ids.length === 0) {
+      onUpdate([]);
+      return () => {};
+    }
 
-    return onSnapshot(
-      q,
-      (snap) => {
-        const convs: FirestoreConversation[] = snap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<FirestoreConversation, 'id'>),
-        }));
-        onUpdate(convs);
-      },
-      (error) => {
-        console.error('[Firestore] listenToConversations snapshot error:', error);
+    const unsubs: (() => void)[] = [];
+    const convMap = new Map<string, FirestoreConversation>();
+
+    const emitSorted = () => {
+      const convs = Array.from(convMap.values());
+      convs.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.lastMessageTime || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.lastMessageTime || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      // Cache conversations locally
+      if (ids[0]) {
+        FirestoreChatService.cacheConversations(ids[0], convs);
       }
-    );
+      onUpdate(convs);
+    };
+
+    ids.forEach((uid) => {
+      const q = query(
+        collection(db, 'conversations'),
+        where('participants', 'array-contains', uid)
+      );
+
+      const unsub = onSnapshot(
+        q,
+        (snap) => {
+          snap.docs.forEach((d) => {
+            convMap.set(d.id, {
+              id: d.id,
+              ...(d.data() as Omit<FirestoreConversation, 'id'>),
+            });
+          });
+          emitSorted();
+        },
+        (error) => {
+          console.error(`[Firestore] listenToConversations snapshot error for uid ${uid}:`, error);
+        }
+      );
+      unsubs.push(unsub);
+    });
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
   },
 
   /**
    * Listen to messages in a conversation in real-time.
+   * Avoids dropping messages with missing/pending timestamps by ordering in JS.
    */
   listenToMessages(
     conversationId: string,
     onUpdate: (messages: FirestoreMessage[]) => void
   ): () => void {
     const msgsRef = collection(db, 'conversations', conversationId, 'messages');
-    const q = query(msgsRef, orderBy('timestamp', 'asc'));
 
     return onSnapshot(
-      q,
+      msgsRef,
       (snap) => {
         const msgs: FirestoreMessage[] = snap.docs.map((d) => {
           const data = d.data();
+          const raw =
+            data.timestamp instanceof Timestamp
+              ? data.timestamp.toDate().toISOString()
+              : data.createdAt ||
+                (typeof data.timestamp === 'string' ? data.timestamp : null);
+
           return {
             id: d.id,
             senderId: data.senderId,
             senderName: data.senderName,
             senderRole: data.senderRole,
             text: data.text || '',
-            timestamp: tsToString(data.timestamp),
-            rawTimestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate().toISOString() : data.createdAt || (typeof data.timestamp === 'string' ? data.timestamp : null),
+            timestamp: tsToString(data.timestamp) || tsToString(data.createdAt) || 'Just now',
+            rawTimestamp: raw,
             isRead: data.isRead ?? false,
             isEdited: data.isEdited ?? false,
             editedAt: data.editedAt,
@@ -360,6 +436,20 @@ export const FirestoreChatService = {
             offer: data.offer,
           } as FirestoreMessage;
         });
+
+        const getSortTime = (m: FirestoreMessage) => {
+          if (m.rawTimestamp) {
+            const t = new Date(m.rawTimestamp).getTime();
+            if (!isNaN(t)) return t;
+          }
+          return 0;
+        };
+
+        msgs.sort((a, b) => getSortTime(a) - getSortTime(b));
+
+        // Auto-cache messages for instant 0ms retrieval on next open
+        FirestoreChatService.cacheMessages(conversationId, msgs);
+
         onUpdate(msgs);
       },
       (error) => {
@@ -484,7 +574,10 @@ export const FirestoreChatService = {
       ...(downloadUrl ? { voiceUrl: downloadUrl } : {}),
       ...(base64Audio ? { voiceBase64: base64Audio } : {}),
       timestamp: serverTimestamp(),
+      createdAt: new Date().toISOString(),
       isRead: false,
+      isEdited: false,
+      isDeleted: false,
     });
 
     // 4. Update conversation metadata

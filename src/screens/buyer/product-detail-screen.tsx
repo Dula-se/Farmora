@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   Platform,
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ApiProduceItem } from '@/services/api';
+import { WishlistService } from '@/services/wishlist-service';
 import { useCart } from '@/context/cart-context';
 import { ImageGalleryModal } from './image-gallery-modal';
 import { PriceTrendsModal } from './price-trends-modal';
@@ -29,6 +30,7 @@ interface ProductDetailScreenProps {
   onOpenFarmMap?: (product: ApiProduceItem) => void;
   onOpenWishlist?: () => void;
   onOpenCart?: () => void;
+  onOpenFarmerProfile?: (farmer: { id: string; name: string; avatar?: string }) => void;
 }
 
 export function ProductDetailScreen({
@@ -42,6 +44,7 @@ export function ProductDetailScreen({
   onOpenFarmMap,
   onOpenWishlist,
   onOpenCart,
+  onOpenFarmerProfile,
 }: ProductDetailScreenProps) {
   const { addToCart, totalCount: cartTotalCount } = useCart();
   const [selectedQty, setSelectedQty] = useState(product.minimumOrderQuantity || 10);
@@ -68,10 +71,17 @@ export function ProductDetailScreen({
     }
   };
 
-  const handleToggleFavorite = () => {
-    const nextState = !isFavorite;
-    setIsFavorite(nextState);
-    if (nextState) {
+  useEffect(() => {
+    const pId = String(product.id || (product as any)._id || '');
+    if (pId) {
+      WishlistService.isWishlisted(pId).then(setIsFavorite).catch(() => {});
+    }
+  }, [product.id, (product as any)._id]);
+
+  const handleToggleFavorite = async () => {
+    const res = await WishlistService.toggleWishlist(product);
+    setIsFavorite(res.isWishlisted);
+    if (res.isWishlisted) {
       setShowSavedWishlistModal(true);
     }
   };
@@ -305,7 +315,17 @@ export function ProductDetailScreen({
           {/* Farmer Card (Tap to view farmer profile & ratings) */}
           <Pressable
             style={({ pressed }) => [styles.farmerCard, pressed && { opacity: 0.95 }]}
-            onPress={() => onOpenReviews?.(product)}>
+            onPress={() => {
+              if (onOpenFarmerProfile) {
+                onOpenFarmerProfile({
+                  id: String(product.farmerId || (product as any)._id || product.id || 'farmer-1'),
+                  name: product.farmerName || 'Farmer',
+                  avatar: product.farmerAvatar,
+                });
+              } else {
+                onOpenReviews?.(product);
+              }
+            }}>
             <View style={styles.farmerAvatarCircle}>
               {product.farmerAvatar ? (
                 <Image

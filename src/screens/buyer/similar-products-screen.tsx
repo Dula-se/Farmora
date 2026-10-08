@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { fetchProduceListings, ApiProduceItem } from '@/services/api';
+import { WishlistService } from '@/services/wishlist-service';
 
 interface SimilarProductsScreenProps {
   baseProduct?: ApiProduceItem | null;
@@ -45,6 +46,10 @@ export function SimilarProductsScreen({
 
   useEffect(() => {
     loadSimilarProduce();
+    const unsub = WishlistService.subscribe((wItems) => {
+      setWishlistIds(wItems.map((wi) => wi.produceId));
+    });
+    return () => unsub();
   }, [baseProduct, selectedFilter]);
 
   const loadSimilarProduce = async () => {
@@ -71,16 +76,9 @@ export function SimilarProductsScreen({
     }
   };
 
-  const toggleWishlist = (p: ApiProduceItem) => {
-    const pId = p._id || p.id;
-    if (!pId) return;
-
-    if (wishlistIds.includes(pId)) {
-      setWishlistIds((prev) => prev.filter((id) => id !== pId));
-    } else {
-      setWishlistIds((prev) => [...prev, pId]);
-      onToggleWishlist?.(p);
-    }
+  const toggleWishlist = async (p: ApiProduceItem) => {
+    await WishlistService.toggleWishlist(p);
+    onToggleWishlist?.(p);
   };
 
   return (

@@ -299,6 +299,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenFarmMap={() => setCurrentView('farm-map')}
             onOpenWishlist={() => setCurrentView('wishlist')}
             onOpenCart={() => setCurrentView('cart')}
+            onOpenFarmerProfile={(farmer) => {
+              setSelectedFarmer(farmer);
+              setCurrentView('farmer-public-profile');
+            }}
           />
         )}
 
@@ -306,7 +310,14 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <ReviewsScreen
             product={selectedProduct}
             onBack={() => setCurrentView('product-detail')}
-            onWriteReview={() => setCurrentView('rate-experience')}
+            onWriteReview={() => {
+              setSelectedFarmer({
+                id: selectedProduct.farmerId || (selectedProduct as any)._id || selectedProduct.id || 'farmer-1',
+                name: selectedProduct.farmerName || 'Farmer',
+                avatar: selectedProduct.farmerAvatar,
+              });
+              setCurrentView('rate-experience');
+            }}
           />
         )}
 
@@ -337,6 +348,21 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <WishlistScreen
             onBack={() => setCurrentView('home')}
             onViewCart={() => setCurrentView('cart')}
+            onSelectProduct={(item) => {
+              handleSelectProduct({
+                id: item.produceId || item.id,
+                _id: item.produceId || item.id,
+                title: item.title,
+                pricePerUnit: item.pricePerUnit,
+                unit: item.unit,
+                farmerName: item.farmerName,
+                locationCity: item.locationCity,
+                images: [item.image],
+                category: item.category || 'vegetables',
+                isOrganic: item.organic || false,
+                availableQuantity: item.inStock ? 100 : 0,
+              } as any);
+            }}
           />
         )}
 
@@ -435,8 +461,16 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <RateExperienceScreen
             farmerId={selectedFarmer.id}
             farmerName={selectedFarmer.name}
-            onBack={() => setCurrentView(selectedProduct ? 'reviews' : 'home')}
-            onSubmitSuccess={() => setCurrentView(selectedProduct ? 'reviews' : 'home')}
+            onBack={() => setCurrentView(selectedProduct ? 'reviews' : 'farmer-public-profile')}
+            onSubmitSuccess={() => {
+              if (selectedFarmer?.id) {
+                setCurrentView('farmer-public-profile');
+              } else if (selectedProduct) {
+                setCurrentView('reviews');
+              } else {
+                setCurrentView('home');
+              }
+            }}
           />
         )}
 

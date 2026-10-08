@@ -118,9 +118,17 @@ async function saveStoredLocalReviews(reviews: RatingReview[]): Promise<void> {
 export const RatingService = {
   /**
    * Fetch all reviews for a specific target (farmer or buyer).
+   * Supports matching by ID aliases (e.g. mongo id, slug, custom id) as well as by farmer/buyer name.
    */
-  async fetchReviewsForTarget(targetId: string): Promise<RatingReview[]> {
+  async fetchReviewsForTarget(
+    targetIdOrIds: string | string[],
+    targetName?: string
+  ): Promise<RatingReview[]> {
     const resultsMap = new Map<string, RatingReview>();
+
+    const rawIds = Array.isArray(targetIdOrIds) ? targetIdOrIds : [targetIdOrIds];
+    const targetIds = rawIds.filter(Boolean);
+    const normTargetName = targetName?.trim().toLowerCase();
 
     let deletedIds: string[] = [];
     try {
@@ -128,24 +136,34 @@ export const RatingService = {
       if (rawDeleted) deletedIds = JSON.parse(rawDeleted);
     } catch {}
 
+    const matchesTarget = (r: RatingReview) => {
+      if (deletedIds.includes(r.id)) return false;
+      // 1. Direct ID match or case-insensitive slug match
+      if (targetIds.some((tid) => tid === r.targetId || (r.targetId && tid.toLowerCase() === r.targetId.toLowerCase()))) {
+        return true;
+      }
+      // 2. Name match (case-insensitive)
+      if (normTargetName && r.targetName && r.targetName.trim().toLowerCase() === normTargetName) {
+        return true;
+      }
+      return false;
+    };
+
     // 1. Add matching seed reviews
-    SEED_REVIEWS.filter((r) => r.targetId === targetId && !deletedIds.includes(r.id)).forEach((r) => {
+    SEED_REVIEWS.filter(matchesTarget).forEach((r) => {
       resultsMap.set(r.id, r);
     });
 
-    // 2. Add local storage reviews
+    // 2. Add local storage reviews (offline instant cache)
     const local = await getStoredLocalReviews();
-    local.filter((r) => r.targetId === targetId && !deletedIds.includes(r.id)).forEach((r) => {
+    local.filter(matchesTarget).forEach((r) => {
       resultsMap.set(r.id, r);
     });
 
-    // 3. Fetch from Firestore
+    // 3. Fetch from Firestore reviews collection
     try {
-      const q = query(
-        collection(db, 'reviews'),
-        where('targetId', '==', targetId)
-      );
-      const snap = await getDocs(q);
+      const reviewsCol = collection(db, 'reviews');
+      const snap = await getDocs(reviewsCol);
       snap.forEach((d) => {
         if (deletedIds.includes(d.id)) return;
         const data = d.data();
@@ -154,7 +172,7 @@ export const RatingService = {
             ? data.createdAt.toDate().toISOString()
             : data.createdAt || new Date().toISOString();
 
-        resultsMap.set(d.id, {
+        const revItem: RatingReview = {
           id: d.id,
           targetId: data.targetId,
           targetName: data.targetName,
@@ -171,7 +189,11 @@ export const RatingService = {
           createdAt,
           updatedAt: data.updatedAt,
           helpfulCount: data.helpfulCount || 0,
-        });
+        };
+
+        if (matchesTarget(revItem)) {
+          resultsMap.set(d.id, revItem);
+        }
       });
     } catch (e) {
       // Offline fallback
@@ -185,9 +207,13 @@ export const RatingService = {
   /**
    * Get user's own review for a target, if already rated.
    */
-  async getMyReviewForTarget(authorId: string, targetId: string): Promise<RatingReview | null> {
-    if (!authorId || !targetId) return null;
-    const all = await this.fetchReviewsForTarget(targetId);
+  async getMyReviewForTarget(
+    authorId: string,
+    targetId: string | string[],
+    targetName?: string
+  ): Promise<RatingReview | null> {
+    if (!authorId) return null;
+    const all = await this.fetchReviewsForTarget(targetId, targetName);
     return all.find((r) => r.authorId === authorId) || null;
   },
 

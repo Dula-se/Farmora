@@ -21,6 +21,7 @@ import {
   fetchWishlist,
   toggleWishlist,
 } from '@/services/api';
+import { WishlistService } from '@/services/wishlist-service';
 import { useCart } from '@/context/cart-context';
 import { MARKET_CATEGORIES } from './all-categories-screen';
 import { FilterModal, FilterState } from './filter-modal';
@@ -137,6 +138,15 @@ export function BuyerHomeScreen({
 
   useEffect(() => {
     loadData();
+    const unsub = WishlistService.subscribe((wItems) => {
+      const ids = new Set<string>();
+      wItems.forEach((wi) => {
+        if (wi.produceId) ids.add(wi.produceId);
+        if (wi.id) ids.add(wi.id);
+      });
+      setWishlistedIds(ids);
+    });
+    return () => unsub();
   }, [loadData]);
 
   const onRefresh = () => {
@@ -145,30 +155,13 @@ export function BuyerHomeScreen({
   };
 
   const handleToggleWishlist = async (item: ApiProduceItem) => {
-    const pId = item.id || (item as any)._id;
-    const isCurrentlyWishlisted = wishlistedIds.has(pId);
-    setWishlistedIds((prev) => {
-      const next = new Set(prev);
-      if (isCurrentlyWishlisted) {
-        next.delete(pId);
-      } else {
-        next.add(pId);
-      }
-      return next;
-    });
-
+    const res = await WishlistService.toggleWishlist(item);
     setToastMessage(
-      isCurrentlyWishlisted
+      !res.isWishlisted
         ? `Removed "${item.title}" from Wishlist`
         : `Saved "${item.title}" to Wishlist ❤️`
     );
     setTimeout(() => setToastMessage(null), 2200);
-
-    try {
-      await toggleWishlist(pId);
-    } catch (err) {
-      console.warn('[BuyerHomeScreen] Wishlist toggle API error:', err);
-    }
   };
 
   const handleAddToCart = (item: ApiProduceItem) => {

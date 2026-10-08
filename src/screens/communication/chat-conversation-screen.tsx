@@ -138,27 +138,37 @@ export function ChatConversationScreen({
   }, [conversationId]);
 
   const loadUserAndListen = async () => {
+    // 1. Instantly display cached messages from AsyncStorage (0ms latency!)
+    try {
+      const cached = await FirestoreChatService.getCachedMessages(conversationId);
+      if (cached && cached.length > 0) {
+        setMessages(cached);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 50);
+      }
+    } catch {}
+
     const user = await getStoredUser();
     setCurrentUser(user);
 
-    // Fetch conversation metadata (names, roles, product context)
-    try {
-      const convSnap = await getDoc(doc(db, 'conversations', conversationId));
-      if (convSnap.exists()) {
-        setConvMeta({ id: convSnap.id, ...(convSnap.data() as any) });
-      }
-    } catch (e) {
-      console.warn('[Chat] Failed to load conversation doc:', e);
-    }
+    // 2. Fetch conversation metadata non-blocking in background
+    getDoc(doc(db, 'conversations', conversationId))
+      .then((convSnap) => {
+        if (convSnap.exists()) {
+          setConvMeta({ id: convSnap.id, ...(convSnap.data() as any) });
+        }
+      })
+      .catch((e) => {
+        console.warn('[Chat] Failed to load conversation doc:', e);
+      });
 
-    // Real-time messages listener
+    // 3. Real-time messages listener immediately
     const unsub = FirestoreChatService.listenToMessages(conversationId, (msgs) => {
       setMessages(msgs);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
     });
     unsubscribeRef.current = unsub;
 
-    // Mark as read
+    // 4. Mark as read
     if (user) {
       const myId = user.id || user._id || '';
       FirestoreChatService.markConversationRead(conversationId, myId);
@@ -465,6 +475,23 @@ export function ChatConversationScreen({
     const msg = text || inputText.trim();
     if (!msg || !currentUser) return;
     setInputText('');
+
+    // Optimistic UI: display bubble immediately without waiting for network roundtrip
+    const optimisticMsg: FirestoreMessage = {
+      id: `temp_${Date.now()}`,
+      senderId: currentUser.id || currentUser._id || '',
+      senderName: currentUser.fullName || 'You',
+      senderRole: currentUser.accountType === 'farmer' ? 'farmer' : 'buyer',
+      text: msg,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      rawTimestamp: new Date().toISOString(),
+      isRead: false,
+      isEdited: false,
+      isDeleted: false,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
     setSending(true);
     try {
       await FirestoreChatService.sendMessage({

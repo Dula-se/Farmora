@@ -59,12 +59,14 @@ export function FarmerPublicProfileScreen({
   useEffect(() => {
     loadProfile();
     loadFarmerReviews();
-  }, [farmerId]);
+  }, [farmerId, farmerName]);
 
-  const loadFarmerReviews = async () => {
+  const loadFarmerReviews = async (customName?: string) => {
     try {
+      const resolvedName = customName || profile?.fullName || farmerName;
+      const targetIds = [farmerId, profile?.id, profile?._id].filter(Boolean) as string[];
       const [revs, u] = await Promise.all([
-        RatingService.fetchReviewsForTarget(farmerId),
+        RatingService.fetchReviewsForTarget(targetIds, resolvedName),
         getStoredUser(),
       ]);
       setReviews(revs);
@@ -109,6 +111,9 @@ export function FarmerPublicProfileScreen({
     try {
       const data = await fetchPublicFarmerProfile(farmerId);
       setProfile(data);
+      if (data?.fullName) {
+        loadFarmerReviews(data.fullName);
+      }
     } catch {
       // Fallback preview data matching Screen 10 in Figma
       setProfile({

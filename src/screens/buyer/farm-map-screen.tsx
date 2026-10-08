@@ -334,8 +334,8 @@ export function FarmMapScreen({
 
       {/* Top Search & Filter Bar */}
       <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} style={styles.navBtn}>
-          <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+        <Pressable onPress={onBack} hitSlop={16} style={styles.navBtn} accessibilityLabel="Back">
+          <Svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
             <Path d="M19 12H5M12 19l-7-7 7-7" />
           </Svg>
         </Pressable>
@@ -474,6 +474,17 @@ export function FarmMapScreen({
 
           {/* Floating Live GPS & Google Maps Launcher Bar */}
           <View style={styles.mapTopFloatingBar}>
+            <Pressable
+              style={styles.mapFloatingBackBtn}
+              onPress={onBack}
+              hitSlop={12}
+              accessibilityLabel="Back">
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M19 12H5M12 19l-7-7 7-7" />
+              </Svg>
+              <Text style={styles.mapFloatingBackText}>Back</Text>
+            </Pressable>
+
             <View style={styles.gpsLiveBadge}>
               <View style={styles.gpsLiveIndicator} />
               <Text style={styles.gpsLiveText}>
@@ -899,6 +910,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 0,
   },
   header: {
     flexDirection: 'row',
@@ -910,12 +922,14 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F1F5F9',
   },
   navBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#F8FAFC',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F1F5F9',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   searchBar: {
     flex: 1,
@@ -994,7 +1008,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
     zIndex: 10,
+  },
+  mapFloatingBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  mapFloatingBackText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   gpsLiveBadge: {
     flexDirection: 'row',
