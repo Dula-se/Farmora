@@ -111,6 +111,58 @@ export function AuctionRoomScreen({
 
   const currentUserId = currentUser?.id || currentUser?._id || 'buyer-sunil';
   const currentUserName = (currentUser?.fullName || currentUser?.name || 'Sunil Dissanayake').toLowerCase();
+  const isFarmerOwner =
+    auction.farmerId === currentUserId ||
+    (currentUser as any)?.role === 'farmer' ||
+    (currentUser as any)?.accountType === 'farmer';
+
+  const handleRetractBid = (bid: any) => {
+    Alert.alert(
+      'Retract / Delete Bid',
+      `Are you sure you want to retract your bid of Rs. ${bid.bidAmountPerKg}/kg on this lot?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Retract Bid',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const updated = await AuctionService.deleteBid(auction.id || (auction as any)._id, bid.timestamp);
+              setAuction(updated);
+              onAuctionUpdated?.(updated);
+              setBidPerKg(updated.currentBidPerKg + updated.minBidIncrement);
+              Alert.alert('Bid Retracted', 'Your bid has been removed.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not retract bid.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAuction = () => {
+    Alert.alert(
+      'Delete Auction Lot',
+      `Are you sure you want to delete this auction (${auction.cropName})? All bids and data will be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AuctionService.deleteAuction(auction.id || (auction as any)._id);
+              Alert.alert('Deleted', 'Auction lot deleted successfully.');
+              onBack();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not delete auction.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const isHighestBidder =
     (auction.highestBidderId && (auction.highestBidderId === currentUserId || auction.highestBidderId === 'buyer-sunil')) ||
@@ -144,7 +196,13 @@ export function AuctionRoomScreen({
           <Text style={styles.lotSizeHeader}>{auction.lotSizeKg} kg Lot</Text>
         </View>
 
-        <View style={{ width: 40 }} />
+        {isFarmerOwner ? (
+          <Pressable onPress={handleDeleteAuction} hitSlop={12} style={styles.deleteAuctionHeaderBtn}>
+            <Text style={{ fontSize: 18 }}>🗑️</Text>
+          </Pressable>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -273,20 +331,43 @@ export function AuctionRoomScreen({
           {auction.bids.length === 0 ? (
             <Text style={styles.noBidsText}>No bids placed yet. Be the first to bid!</Text>
           ) : (
-            auction.bids.slice(0, 5).map((b, idx) => (
-              <View key={`${b.timestamp}-${idx}`} style={styles.historyRow}>
-                <View style={styles.historyLeft}>
-                  <Text style={styles.historyBidder}>{b.bidderName}</Text>
-                  <Text style={styles.historyTime}>
-                    {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+            auction.bids.slice(0, 5).map((b, idx) => {
+              const isMyBid =
+                b.bidderId === currentUserId ||
+                b.bidderId === 'buyer-sunil' ||
+                b.bidderName.toLowerCase() === currentUserName ||
+                b.bidderName.toLowerCase().includes('sunil');
+
+              return (
+                <View key={`${b.timestamp}-${idx}`} style={styles.historyRow}>
+                  <View style={styles.historyLeft}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.historyBidder}>{b.bidderName}</Text>
+                      {isMyBid && (
+                        <View style={styles.myBidBadge}>
+                          <Text style={styles.myBidBadgeText}>You</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.historyTime}>
+                      {new Date(b.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
+                  <View style={styles.historyRight}>
+                    <Text style={styles.historyPrice}>Rs. {b.bidAmountPerKg} / kg</Text>
+                    <Text style={styles.historyLotTotal}>Rs. {b.totalLotAmount.toLocaleString()}</Text>
+                  </View>
+                  {!isEnded && isMyBid && (
+                    <Pressable
+                      style={styles.retractBidBtn}
+                      hitSlop={8}
+                      onPress={() => handleRetractBid(b)}>
+                      <Text style={styles.retractBidBtnText}>✕ Retract</Text>
+                    </Pressable>
+                  )}
                 </View>
-                <View style={styles.historyRight}>
-                  <Text style={styles.historyPrice}>Rs. {b.bidAmountPerKg} / kg</Text>
-                  <Text style={styles.historyLotTotal}>Rs. {b.totalLotAmount.toLocaleString()}</Text>
-                </View>
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -672,6 +753,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
+  },
+  myBidBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  myBidBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  retractBidBtn: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginLeft: 8,
+    alignSelf: 'center',
+  },
+  retractBidBtnText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  deleteAuctionHeaderBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bottomBiddingBar: {
     position: 'absolute',

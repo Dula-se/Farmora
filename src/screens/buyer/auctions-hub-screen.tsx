@@ -90,6 +90,52 @@ export function AuctionsHubScreen({
     }
   };
 
+  const handleRetractUserBid = (item: AuctionItem) => {
+    Alert.alert(
+      'Retract / Delete Bid',
+      `Are you sure you want to retract your bid on ${item.cropName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Retract',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const updated = await AuctionService.deleteBid(item.id || item._id || '');
+              setAuctions((prev) => prev.map((a) => (a.id === updated.id || a.id === item.id ? updated : a)));
+              Alert.alert('Bid Retracted', 'Your bid has been removed.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not retract bid.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAuction = (item: AuctionItem) => {
+    Alert.alert(
+      'Delete Auction Lot',
+      `Are you sure you want to delete this auction (${item.cropName})? All bids will be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AuctionService.deleteAuction(item.id || item._id || '');
+              setAuctions((prev) => prev.filter((a) => a.id !== item.id && a._id !== item.id && a.id !== item._id));
+              Alert.alert('Deleted', 'Auction has been deleted.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not delete auction.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatCountdown = (endTimeIso: string) => {
     const diff = new Date(endTimeIso).getTime() - Date.now();
     if (diff <= 0) return 'Ended';
@@ -391,14 +437,27 @@ export function AuctionsHubScreen({
                           <Text style={styles.viewWonBtnText}>View Receipt</Text>
                         </Pressable>
                       ) : (
-                        <Pressable
-                          style={styles.enterRoomBtn}
-                          onPress={() => onSelectAuction(item)}
-                        >
-                          <Text style={styles.enterRoomBtnText}>
-                            {isLive ? 'Bid Live' : 'View Details'}
-                          </Text>
-                        </Pressable>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {activeTab === 'my-bids' && isLive && (
+                            <Pressable
+                              style={styles.retractCardBtn}
+                              onPress={(e) => {
+                                e.stopPropagation?.();
+                                handleRetractUserBid(item);
+                              }}
+                            >
+                              <Text style={styles.retractCardBtnText}>✕ Retract</Text>
+                            </Pressable>
+                          )}
+                          <Pressable
+                            style={styles.enterRoomBtn}
+                            onPress={() => onSelectAuction(item)}
+                          >
+                            <Text style={styles.enterRoomBtnText}>
+                              {isLive ? 'Bid Live' : 'View Details'}
+                            </Text>
+                          </Pressable>
+                        </View>
                       )}
                     </View>
                   </View>
@@ -807,5 +866,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: '#15803D',
+  },
+  retractCardBtn: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retractCardBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#DC2626',
   },
 });

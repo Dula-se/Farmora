@@ -338,6 +338,23 @@ export const OrderService = {
     }
   },
 
+  async deleteOrder(orderId: string): Promise<boolean> {
+    let local = await loadStoredOrders();
+    const updated = local.filter((o) => o.id !== orderId && o.orderNumber !== orderId && o._id !== orderId);
+    ordersCache = updated;
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+
+    try {
+      await apiFetch<any>(`/orders/${encodeURIComponent(orderId)}`, {
+        method: 'DELETE',
+      });
+      return true;
+    } catch (e) {
+      console.warn('[OrderService] deleteOrder API fallback:', e);
+      return true;
+    }
+  },
+
   async createNewOrder(orderData: Partial<FarmoraOrder>): Promise<FarmoraOrder> {
     const user = await getStoredUser();
     const buyerId = orderData.buyerId || user?.id || user?._id || 'buyer-sunil';

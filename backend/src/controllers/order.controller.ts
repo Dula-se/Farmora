@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { OrderModel } from '../models/Order.js';
 import { NotificationController } from './notification.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
@@ -265,6 +266,35 @@ export class OrderController {
     } catch (err: any) {
       console.error('[OrderController] verifyDeliveryQr error:', err);
       return sendError(res, err.message || 'Could not verify delivery.', 500);
+    }
+  }
+
+  /**
+   * Delete an order by ID or orderNumber
+   */
+  static async deleteOrder(req: Request, res: Response) {
+    try {
+      const rawId = req.params.id;
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
+      if (!id) {
+        return sendError(res, 'Order ID is required.', 400);
+      }
+
+      const order = await OrderModel.findOneAndDelete({
+        $or: [
+          mongoose.Types.ObjectId.isValid(id) ? { _id: id } : { _id: new mongoose.Types.ObjectId() },
+          { orderNumber: id },
+        ],
+      });
+
+      if (!order) {
+        return sendError(res, 'Order not found.', 404);
+      }
+
+      return sendSuccess(res, { deletedId: id, orderNumber: order.orderNumber }, 'Order deleted successfully.');
+    } catch (err: any) {
+      console.error('[OrderController] deleteOrder error:', err);
+      return sendError(res, err.message || 'Could not delete order.', 500);
     }
   }
 }

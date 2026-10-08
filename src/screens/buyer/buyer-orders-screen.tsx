@@ -51,6 +51,29 @@ export function BuyerOrdersScreen({
     setRefreshing(false);
   };
 
+  const handleDeleteOrder = (order: FarmoraOrder) => {
+    Alert.alert(
+      'Delete Order',
+      `Are you sure you want to delete order ${order.orderNumber}? This will remove it from your records.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await OrderService.deleteOrder(order.id || order.orderNumber);
+              setOrders((prev) => prev.filter((o) => o.id !== order.id && o.orderNumber !== order.orderNumber));
+              Alert.alert('Deleted', `Order ${order.orderNumber} deleted successfully.`);
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not delete order.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const filteredOrders = orders.filter((ord) => {
     const matchesSearch =
       ord.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -175,14 +198,24 @@ export function BuyerOrdersScreen({
                     <Text style={styles.orderNumberText}>{ord.orderNumber}</Text>
                     <Text style={styles.orderDateText}>{ord.orderDate}</Text>
                   </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      { backgroundColor: statusStyle.bg, borderColor: statusStyle.border },
-                    ]}>
-                    <Text style={[styles.statusPillText, { color: statusStyle.text }]}>
-                      ● {ord.status}
-                    </Text>
+                  <View style={styles.headerRightActions}>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        { backgroundColor: statusStyle.bg, borderColor: statusStyle.border },
+                      ]}>
+                      <Text style={[styles.statusPillText, { color: statusStyle.text }]}>
+                        ● {ord.status}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={styles.deleteOrderHeaderBtn}
+                      hitSlop={10}
+                      onPress={() => handleDeleteOrder(ord)}>
+                      <Svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                        <Path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+                      </Svg>
+                    </Pressable>
                   </View>
                 </View>
 
@@ -798,6 +831,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#B91C1C',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  deleteOrderHeaderBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalOverlay: {
     flex: 1,

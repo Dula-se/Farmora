@@ -314,6 +314,90 @@ export class AuctionController {
   }
 
   /**
+   * Delete an entire auction lot
+   */
+  static async deleteAuction(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const auction = await AuctionController.findAuctionById(id);
+
+      if (!auction) {
+        return sendError(res, 'Auction not found.', 404);
+      }
+
+      await AuctionModel.findByIdAndDelete(auction._id);
+
+      return sendSuccess(res, { deletedId: id }, 'Auction deleted successfully.');
+    } catch (err: any) {
+      console.error('[AuctionController] deleteAuction error:', err);
+      return sendError(res, err.message || 'Could not delete auction.', 500);
+    }
+  }
+
+  /**
+   * Delete / retract a bid from an auction
+   */
+  static async deleteBid(req: Request, res: Response) {
+    try {
+      const { id, bidIndexOrId } = req.params;
+      const bidderId = req.body?.bidderId || req.query?.bidderId;
+      const timestamp = req.body?.timestamp || req.query?.timestamp;
+
+      const auction = await AuctionController.findAuctionById(id);
+      if (!auction) {
+        return sendError(res, 'Auction not found.', 404);
+      }
+
+      const originalBidsLength = auction.bids.length;
+      if (originalBidsLength === 0) {
+        return sendError(res, 'No bids to delete on this auction.', 400);
+      }
+
+      // Filter out the requested bid
+      auction.bids = auction.bids.filter((b: any, idx: number) => {
+        if (bidIndexOrId !== undefined) {
+          if (b._id && b._id.toString() === bidIndexOrId) return false;
+          if (String(idx) === bidIndexOrId) return false;
+        }
+        if (timestamp && b.timestamp === timestamp) return false;
+        if (bidderId && b.bidderId === bidderId && !timestamp && !bidIndexOrId) {
+          return false;
+        }
+        return true;
+      });
+
+      if (auction.bids.length === originalBidsLength && bidderId) {
+        const idx = auction.bids.findIndex((b: any) => b.bidderId === bidderId);
+        if (idx !== -1) {
+          auction.bids.splice(idx, 1);
+        }
+      }
+
+      auction.bidsCount = auction.bids.length;
+
+      // Recalculate highest bid
+      if (auction.bids.length > 0) {
+        auction.bids.sort((a: any, b: any) => b.bidAmountPerKg - a.bidAmountPerKg);
+        const topBid = auction.bids[0];
+        auction.currentBidPerKg = topBid.bidAmountPerKg;
+        auction.highestBidderId = topBid.bidderId;
+        auction.highestBidderName = topBid.bidderName;
+      } else {
+        auction.currentBidPerKg = auction.startingPricePerKg;
+        auction.highestBidderId = '';
+        auction.highestBidderName = '';
+      }
+
+      await auction.save();
+
+      return sendSuccess(res, auction, 'Bid retracted and deleted successfully.');
+    } catch (err: any) {
+      console.error('[AuctionController] deleteBid error:', err);
+      return sendError(res, err.message || 'Could not delete bid.', 500);
+    }
+  }
+
+  /**
    * Seed realistic live produce auctions
    */
   static async seedDefaultAuctions() {

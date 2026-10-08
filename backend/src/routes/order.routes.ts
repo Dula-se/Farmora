@@ -8,6 +8,7 @@ router.get('/buyer', OrderController.getBuyerOrders);
 router.get('/farmer', OrderController.getFarmerOrders);
 router.get('/:id', OrderController.getOrderById);
 router.patch('/:id/status', OrderController.updateOrderStatus);
+router.delete('/:id', OrderController.deleteOrder);
 router.post('/:id/verify-delivery', OrderController.verifyDeliveryQr);
 
 export default router;

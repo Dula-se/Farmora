@@ -463,4 +463,74 @@ export const AuctionService = {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
     return localItem;
   },
+
+  async deleteAuction(auctionId: string): Promise<boolean> {
+    auctionsCache = auctionsCache.filter((a) => a.id !== auctionId && a._id !== auctionId);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
+
+    try {
+      await apiFetch<any>(`/auctions/${encodeURIComponent(auctionId)}`, {
+        method: 'DELETE',
+      });
+      return true;
+    } catch (e) {
+      console.warn('[AuctionService] deleteAuction fallback:', e);
+      return true;
+    }
+  },
+
+  async deleteBid(auctionId: string, timestamp?: string): Promise<AuctionItem> {
+    const user = await getStoredUser();
+    const bidderId = user?.id || user?._id || 'buyer-sunil';
+
+    const targetIdx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
+    const target = targetIdx !== -1 ? auctionsCache[targetIdx] : null;
+    const apiId = target?._id || target?.id || auctionId;
+
+    try {
+      const res = await apiFetch<any>(`/auctions/${apiId}/bid`, {
+        method: 'DELETE',
+        body: JSON.stringify({ bidderId, timestamp }),
+      });
+
+      if (res.data) {
+        const updated = mapDbAuction(res.data);
+        if (targetIdx !== -1) {
+          auctionsCache[targetIdx] = updated;
+        }
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
+        return updated;
+      }
+    } catch (e) {
+      console.warn('[AuctionService] deleteBid network error, executing locally:', e);
+    }
+
+    if (targetIdx !== -1) {
+      const current = { ...auctionsCache[targetIdx] };
+      current.bids = (current.bids || []).filter((b) => {
+        if (timestamp && b.timestamp === timestamp) return false;
+        if (!timestamp && b.bidderId === bidderId) return false;
+        return true;
+      });
+      current.bidsCount = current.bids.length;
+
+      if (current.bids.length > 0) {
+        current.bids.sort((a, b) => b.bidAmountPerKg - a.bidAmountPerKg);
+        const top = current.bids[0];
+        current.currentBidPerKg = top.bidAmountPerKg;
+        current.highestBidderId = top.bidderId;
+        current.highestBidderName = top.bidderName;
+      } else {
+        current.currentBidPerKg = current.startingPricePerKg;
+        current.highestBidderId = undefined;
+        current.highestBidderName = undefined;
+      }
+
+      auctionsCache[targetIdx] = current;
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
+      return current;
+    }
+
+    throw new Error('Auction not found');
+  },
 };

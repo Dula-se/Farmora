@@ -83,6 +83,29 @@ export function FarmerOrdersScreen({
     );
   };
 
+  const handleDeleteOrder = (order: FarmoraOrder) => {
+    Alert.alert(
+      'Delete Order',
+      `Are you sure you want to delete order ${order.orderNumber}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await OrderService.deleteOrder(order.id || order.orderNumber);
+              setOrders((prev) => prev.filter((o) => o.id !== order.id && o.orderNumber !== order.orderNumber));
+              Alert.alert('Deleted', `Order ${order.orderNumber} deleted.`);
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not delete order.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const filteredOrders = orders.filter((ord) => {
     const matchesSearch =
       ord.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -222,22 +245,32 @@ export function FarmerOrdersScreen({
                     <Text style={styles.orderNumber}>{ord.orderNumber}</Text>
                     <Text style={styles.orderDate}>{ord.orderDate}</Text>
                   </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      isPending && { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
-                      isDispatched && { backgroundColor: '#DBEAFE', borderColor: '#BFDBFE' },
-                      isDelivered && { backgroundColor: '#DCFCE7', borderColor: '#BBF7D0' },
-                    ]}>
-                    <Text
+                  <View style={styles.headerRightActions}>
+                    <View
                       style={[
-                        styles.statusPillText,
-                        isPending && { color: '#D97706' },
-                        isDispatched && { color: '#1D4ED8' },
-                        isDelivered && { color: '#15803D' },
+                        styles.statusPill,
+                        isPending && { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' },
+                        isDispatched && { backgroundColor: '#DBEAFE', borderColor: '#BFDBFE' },
+                        isDelivered && { backgroundColor: '#DCFCE7', borderColor: '#BBF7D0' },
                       ]}>
-                      ● {ord.status}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          isPending && { color: '#D97706' },
+                          isDispatched && { color: '#1D4ED8' },
+                          isDelivered && { color: '#15803D' },
+                        ]}>
+                        ● {ord.status}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={styles.deleteOrderHeaderBtn}
+                      hitSlop={10}
+                      onPress={() => handleDeleteOrder(ord)}>
+                      <Svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                        <Path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+                      </Svg>
+                    </Pressable>
                   </View>
                 </View>
 
@@ -868,6 +901,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#B45309',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  deleteOrderHeaderBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalOverlay: {
     flex: 1,
