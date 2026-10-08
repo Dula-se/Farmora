@@ -99,24 +99,26 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     otherUserRole: 'buyer',
   });
   const [activeBuyerForRating, setActiveBuyerForRating] = useState({
-    id: 'buyer-sunil',
-    name: 'Sunil Dissanayake',
+    id: '',
+    name: '',
   });
   const [activeCall, setActiveCall] = useState<{
     visible: boolean;
     name: string;
     avatar: string;
     mode: 'audio' | 'video';
+    conversationId?: string;
+    otherUserId?: string;
   }>({
     visible: false,
-    name: 'Sunil Dissanayake',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+    name: '',
+    avatar: '',
     mode: 'audio',
   });
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [reportTarget, setReportTarget] = useState({
-    name: 'Sunil Dissanayake',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+    name: '',
+    avatar: '',
   });
 
   const handleTabPress = (tab: FarmerTab) => {
@@ -292,10 +294,24 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             currentRole="farmer"
             onBack={() => setCurrentView('messages')}
             onStartAudioCall={(name, avatar) => {
-              setActiveCall({ visible: true, name, avatar, mode: 'audio' });
+              setActiveCall({
+                visible: true,
+                name,
+                avatar,
+                mode: 'audio',
+                conversationId: activeChatMeta.conversationId,
+                otherUserId: activeChatMeta.otherUserId,
+              });
             }}
             onStartVideoCall={(name, avatar) => {
-              setActiveCall({ visible: true, name, avatar, mode: 'video' });
+              setActiveCall({
+                visible: true,
+                name,
+                avatar,
+                mode: 'video',
+                conversationId: activeChatMeta.conversationId,
+                otherUserId: activeChatMeta.otherUserId,
+              });
             }}
             onRequestInspection={() => setShowScheduleModal(true)}
             onRateUser={(uId, uName) => {
@@ -423,6 +439,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          conversationId={activeCall.conversationId}
+          otherUserId={activeCall.otherUserId}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
           onSwitchToVideo={() =>
             setActiveCall((prev) => ({ ...prev, mode: 'video' }))
@@ -436,6 +454,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          conversationId={activeCall.conversationId}
+          otherUserId={activeCall.otherUserId}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
         />
       )}

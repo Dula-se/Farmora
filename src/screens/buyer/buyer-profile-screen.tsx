@@ -238,14 +238,18 @@ export function BuyerProfileScreen({
           style={({ pressed }) => [styles.userCard, pressed && { opacity: 0.96 }]}
           onPress={() => setShowInfoModal(true)}>
           <View style={styles.avatarWrapper}>
-            <Image
-              source={{
-                uri:
-                  user?.avatarUrl ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-              }}
-              style={styles.avatarImage}
-            />
+            {user?.avatarUrl ? (
+              <Image
+                source={{ uri: user.avatarUrl }}
+                style={styles.avatarImage}
+              />
+            ) : (
+              <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarInitialText}>
+                  {(user?.fullName || 'User').trim().charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
             <Pressable style={styles.editAvatarBtn} onPress={onEditProfile}>
               <Text style={styles.editAvatarText}>✎</Text>
             </Pressable>
@@ -351,14 +355,18 @@ export function BuyerProfileScreen({
             {/* Buyer Profile Card */}
             <View style={styles.infoSummaryCard}>
               <View style={styles.infoAvatarRow}>
-                <Image
-                  source={{
-                    uri:
-                      user?.avatarUrl ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-                  }}
-                  style={styles.infoAvatar}
-                />
+                {user?.avatarUrl ? (
+                  <Image
+                    source={{ uri: user.avatarUrl }}
+                    style={styles.infoAvatar}
+                  />
+                ) : (
+                  <View style={[styles.infoAvatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.avatarInitialText}>
+                      {(user?.fullName || 'User').trim().charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
                 <View style={{ flex: 1, marginLeft: 14 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={styles.infoFullName}>
@@ -677,6 +685,16 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     borderWidth: 3,
     borderColor: '#386641',
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitialText: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '800',
   },
   editAvatarBtn: {
     position: 'absolute',

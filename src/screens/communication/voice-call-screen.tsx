@@ -9,12 +9,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import * as WebBrowser from 'expo-web-browser';
 import { ChatService } from '@/services/chat-service';
+import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { getStoredUser } from '@/services/api';
 
 interface VoiceCallScreenProps {
   visible: boolean;
   participantName: string;
-  participantAvatar: string;
+  participantAvatar?: string;
+  conversationId?: string;
+  otherUserId?: string;
   onEndCall: () => void;
   onSwitchToVideo?: () => void;
 }
@@ -23,12 +28,18 @@ export function VoiceCallScreen({
   visible,
   participantName,
   participantAvatar,
+  conversationId,
+  otherUserId,
   onEndCall,
   onSwitchToVideo,
 }: VoiceCallScreenProps) {
   const [seconds, setSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
+  const [callId, setCallId] = useState<string | null>(null);
+  const [roomUrl, setRoomUrl] = useState<string>(
+    `https://meet.jit.si/Famora_Voice_${encodeURIComponent((participantName || 'Call').replace(/\s+/g, '_'))}#config.startWithVideoMuted=true&config.prejoinPageEnabled=false`
+  );
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -37,9 +48,30 @@ export function VoiceCallScreen({
       timer = setInterval(() => {
         setSeconds((prev) => prev + 1);
       }, 1000);
+
+      // Initiate call signaling in Firestore
+      (async () => {
+        try {
+          const user = await getStoredUser();
+          if (user && conversationId && otherUserId) {
+            const initiated = await FirestoreChatService.initiateCall({
+              conversationId,
+              currentUser: user,
+              receiverId: otherUserId,
+              receiverName: participantName,
+              receiverAvatar: participantAvatar,
+              mode: 'audio',
+            });
+            setCallId(initiated.callId);
+            setRoomUrl(initiated.roomUrl);
+          }
+        } catch (err) {
+          console.log('[VoiceCallScreen] Signaling notice:', err);
+        }
+      })();
     }
     return () => clearInterval(timer);
-  }, [visible]);
+  }, [visible, conversationId, otherUserId, participantName, participantAvatar]);
 
   const formatTimer = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -47,18 +79,31 @@ export function VoiceCallScreen({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleOpenLiveAudio = async () => {
+    try {
+      await WebBrowser.openBrowserAsync(roomUrl);
+    } catch (e) {
+      console.log('[VoiceCallScreen] WebBrowser open error:', e);
+    }
+  };
+
   const handleEndCall = async () => {
+    if (callId) {
+      await FirestoreChatService.endCall(callId).catch(() => {});
+    }
     await ChatService.addCallRecord({
-      participantName,
-      participantAvatar,
+      participantName: participantName || 'User',
+      participantAvatar: participantAvatar || '',
       participantRole: 'farmer',
       type: 'outgoing',
       callMode: 'audio',
       timestamp: 'Just now',
       duration: formatTimer(seconds),
-    });
+    }).catch(() => {});
     onEndCall();
   };
+
+  const initial = (participantName || 'F').trim().charAt(0).toUpperCase();
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
@@ -68,7 +113,7 @@ export function VoiceCallScreen({
         {/* Top Info */}
         <View style={styles.topInfo}>
           <Text style={styles.encryptedBadge}>🔒 End-to-end Encrypted Call</Text>
-          <Text style={styles.callerName}>{participantName}</Text>
+          <Text style={styles.callerName}>{participantName || 'Participant'}</Text>
           <Text style={styles.callTimer}>{formatTimer(seconds)}</Text>
         </View>
 
@@ -76,7 +121,13 @@ export function VoiceCallScreen({
         <View style={styles.avatarSection}>
           <View style={styles.pulseRingOuter}>
             <View style={styles.pulseRingInner}>
-              <Image source={{ uri: participantAvatar }} style={styles.callerAvatar} contentFit="cover" />
+              {participantAvatar ? (
+                <Image source={{ uri: participantAvatar }} style={styles.callerAvatar} contentFit="cover" />
+              ) : (
+                <View style={[styles.callerAvatar, styles.avatarPlaceholder]}>
+                  <Text style={styles.avatarInitialText}>{initial}</Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -86,7 +137,13 @@ export function VoiceCallScreen({
               <View key={i} style={[styles.waveBar, { height: h }]} />
             ))}
           </View>
-          <Text style={styles.audioQualityText}>HD Voice Active • Direct Connection</Text>
+          <Text style={styles.audioQualityText}>HD Voice Active • Direct WebRTC Connection</Text>
+
+          {/* Live Connect Audio Button */}
+          <Pressable style={styles.liveStreamBtn} onPress={handleOpenLiveAudio}>
+            <Text style={styles.liveStreamIcon}>🎙️</Text>
+            <Text style={styles.liveStreamText}>Connect Live HD Audio</Text>
+          </Pressable>
         </View>
 
         {/* Bottom Control Buttons */}
@@ -253,6 +310,41 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 12,
     marginTop: 6,
+    fontWeight: '700',
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#10B981',
+  },
+  avatarInitialText: {
+    color: '#FFFFFF',
+    fontSize: 44,
+    fontWeight: '800',
+  },
+  liveStreamBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    marginTop: 24,
+    gap: 8,
+    shadowColor: '#10B981',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  liveStreamIcon: {
+    fontSize: 18,
+  },
+  liveStreamText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '700',
   },
 });

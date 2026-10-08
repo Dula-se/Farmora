@@ -42,6 +42,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, storage } from '@/config/firebase';
 import { getStoredUser, ApiUser, fetchProduceListings } from './api';
+import { sendFcmPushNotification } from './notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -515,6 +516,20 @@ export const FirestoreChatService = {
           updatedAt: new Date().toISOString(),
           [`unreadCounts.${otherUserId}`]: currentUnread + 1,
         });
+
+        // 🔔 Send real-time FCM Push Notification to recipient
+        if (otherUserId) {
+          sendFcmPushNotification({
+            recipientUserId: otherUserId,
+            title: params.currentUser.fullName || 'New Message',
+            body: params.text || (params.imageUri ? '📷 Sent a photo' : '💬 New message on Famora'),
+            data: {
+              conversationId: params.conversationId,
+              senderId: myId,
+              type: 'chat_message',
+            },
+          }).catch(() => {});
+        }
       }
     } catch {
       await setDoc(
@@ -606,6 +621,20 @@ export const FirestoreChatService = {
           updatedAt: new Date().toISOString(),
           [`unreadCounts.${otherUserId}`]: currentUnread + 1,
         });
+
+        // 🔔 Send real-time FCM Push Notification for voice note
+        if (otherUserId) {
+          sendFcmPushNotification({
+            recipientUserId: otherUserId,
+            title: params.currentUser.fullName || 'Voice Message',
+            body: `🎙️ Sent a voice note (${durationStr})`,
+            data: {
+              conversationId: params.conversationId,
+              senderId: myId,
+              type: 'voice_note',
+            },
+          }).catch(() => {});
+        }
       }
     } catch {
       await setDoc(
@@ -730,6 +759,72 @@ export const FirestoreChatService = {
     try {
       const convRef = doc(db, 'conversations', conversationId);
       await updateDoc(convRef, { [`unreadCounts.${userId}`]: 0 });
+    } catch {}
+  },
+
+  // ── Audio & Video Call Sessions ──────────────────────────────────────────
+
+  /**
+   * Initiate a real audio or video call session with instant FCM notification and WebRTC room
+   */
+  async initiateCall(params: {
+    conversationId: string;
+    currentUser: ApiUser;
+    receiverId: string;
+    receiverName: string;
+    receiverAvatar?: string;
+    mode: 'audio' | 'video';
+  }): Promise<{ callId: string; roomUrl: string }> {
+    const callId = params.conversationId || `call_${Date.now()}`;
+    const cleanRoom = callId.replace(/[^a-zA-Z0-9]/g, '_');
+    const roomUrl = `https://meet.jit.si/Famora_Call_${cleanRoom}#config.startWithAudioMuted=false&config.prejoinPageEnabled=false`;
+
+    const myId = params.currentUser.id || params.currentUser._id || '';
+    const myName = params.currentUser.fullName || 'User';
+    const myAvatar = params.currentUser.avatarUrl || '';
+
+    const callDocRef = doc(db, 'calls', callId);
+    await setDoc(callDocRef, {
+      id: callId,
+      conversationId: params.conversationId,
+      callerId: myId,
+      callerName: myName,
+      callerAvatar: myAvatar,
+      receiverId: params.receiverId,
+      receiverName: params.receiverName,
+      receiverAvatar: params.receiverAvatar || '',
+      mode: params.mode,
+      status: 'calling',
+      roomUrl,
+      createdAt: new Date().toISOString(),
+    });
+
+    // 🔔 Notify receiver via FCM Push Notification
+    sendFcmPushNotification({
+      recipientUserId: params.receiverId,
+      title: `📞 Incoming ${params.mode === 'video' ? 'Video' : 'Audio'} Call`,
+      body: `${myName} is calling you on Famora...`,
+      data: {
+        callId,
+        mode: params.mode,
+        roomUrl,
+        type: 'incoming_call',
+      },
+    }).catch(() => {});
+
+    return { callId, roomUrl };
+  },
+
+  /**
+   * End a call session in Firestore
+   */
+  async endCall(callId: string): Promise<void> {
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        status: 'ended',
+        endedAt: new Date().toISOString(),
+      });
     } catch {}
   },
 };

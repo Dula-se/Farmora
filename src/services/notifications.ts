@@ -1,7 +1,7 @@
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
 export const isExpoGo =
@@ -145,6 +145,75 @@ export async function saveTokenToFirestore(userId: string, token: string): Promi
     console.log('[Notifications] Token saved to Firestore for user:', userId);
   } catch (err) {
     console.error('[Notifications] Failed to save token to Firestore:', err);
+  }
+}
+
+// ─── Remote FCM / Expo Push Sender ───────────────────────────────────────────
+/**
+ * Sends a real-time push notification to a recipient user using their FCM/Expo token
+ * and creates an in-app notification entry in Firestore.
+ */
+export async function sendFcmPushNotification(params: {
+  recipientUserId: string;
+  title: string;
+  body: string;
+  data?: Record<string, any>;
+}): Promise<boolean> {
+  try {
+    const { recipientUserId, title, body, data } = params;
+    if (!recipientUserId) return false;
+
+    // 1. Fetch recipient's token from Firestore users collection
+    const userDocRef = doc(db, 'users', recipientUserId);
+    const userSnap = await getDoc(userDocRef);
+    if (!userSnap.exists()) return false;
+
+    const userData = userSnap.data();
+    const token = userData?.pushToken || userData?.fcmToken;
+
+    // 2. Persist in-app notification record in Firestore for real-time notification listener
+    try {
+      const notifCol = collection(db, 'users', recipientUserId, 'notifications');
+      const newNotifDoc = doc(notifCol);
+      await setDoc(newNotifDoc, {
+        id: newNotifDoc.id,
+        title,
+        body,
+        data: data || {},
+        createdAt: serverTimestamp(),
+        isRead: false,
+      });
+    } catch {}
+
+    // 3. Send remote push notification via Expo Push Notification service
+    if (token && typeof token === 'string') {
+      try {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            to: token,
+            title,
+            body,
+            data: data || {},
+            sound: 'default',
+            priority: 'high',
+            channelId: 'default',
+          }),
+        });
+        console.log('[Notifications] FCM push notification delivered to:', recipientUserId);
+      } catch (pushErr) {
+        console.warn('[Notifications] Push delivery error:', pushErr);
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[Notifications] sendFcmPushNotification error:', err);
+    return false;
   }
 }
 

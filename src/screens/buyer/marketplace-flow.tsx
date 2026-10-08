@@ -118,17 +118,19 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     name: string;
     avatar: string;
     mode: 'audio' | 'video';
+    conversationId?: string;
+    otherUserId?: string;
   }>({
     visible: false,
-    name: 'Kusuma Bandara',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
+    name: '',
+    avatar: '',
     mode: 'audio',
   });
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ name: string; avatar: string }>({
-    name: 'Kusuma Bandara',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
+    name: '',
+    avatar: '',
   });
 
   const handleSelectCategory = (id: string, name: string) => {
@@ -447,13 +449,30 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             currentRole="buyer"
             onBack={() => setCurrentView(activeTab === 'messages' ? 'messages' : 'home')}
             onStartAudioCall={(name, avatar) => {
-              setActiveCall({ visible: true, name, avatar, mode: 'audio' });
+              setActiveCall({
+                visible: true,
+                name,
+                avatar,
+                mode: 'audio',
+                conversationId: activeChatMeta.conversationId,
+                otherUserId: activeChatMeta.otherUserId,
+              });
             }}
             onStartVideoCall={(name, avatar) => {
-              setActiveCall({ visible: true, name, avatar, mode: 'video' });
+              setActiveCall({
+                visible: true,
+                name,
+                avatar,
+                mode: 'video',
+                conversationId: activeChatMeta.conversationId,
+                otherUserId: activeChatMeta.otherUserId,
+              });
             }}
             onRequestInspection={() => setShowScheduleModal(true)}
             onRateUser={(uId, uName, uAvatar) => {
+              if (uId) {
+                setSelectedFarmer({ id: uId, name: uName || 'Farmer', avatar: uAvatar });
+              }
               setCurrentView('rate-experience');
             }}
           />
@@ -463,6 +482,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <RateExperienceScreen
             farmerId={selectedFarmer.id}
             farmerName={selectedFarmer.name}
+            farmerAvatar={selectedFarmer.avatar}
             onBack={() => setCurrentView(rateOriginView)}
             onSubmitSuccess={() => setCurrentView(rateOriginView)}
           />
@@ -624,6 +644,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          conversationId={activeCall.conversationId}
+          otherUserId={activeCall.otherUserId}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
           onSwitchToVideo={() =>
             setActiveCall((prev) => ({ ...prev, mode: 'video' }))
@@ -637,6 +659,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          conversationId={activeCall.conversationId}
+          otherUserId={activeCall.otherUserId}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
         />
       )}

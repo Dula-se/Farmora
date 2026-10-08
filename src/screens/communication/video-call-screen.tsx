@@ -9,12 +9,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import * as WebBrowser from 'expo-web-browser';
 import { ChatService } from '@/services/chat-service';
+import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { getStoredUser, ApiUser } from '@/services/api';
 
 interface VideoCallScreenProps {
   visible: boolean;
   participantName: string;
-  participantAvatar: string;
+  participantAvatar?: string;
+  conversationId?: string;
+  otherUserId?: string;
   onEndCall: () => void;
 }
 
@@ -22,12 +27,19 @@ export function VideoCallScreen({
   visible,
   participantName,
   participantAvatar,
+  conversationId,
+  otherUserId,
   onEndCall,
 }: VideoCallScreenProps) {
   const [seconds, setSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
   const [videoPaused, setVideoPaused] = useState(false);
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [callId, setCallId] = useState<string | null>(null);
+  const [roomUrl, setRoomUrl] = useState<string>(
+    `https://meet.jit.si/Famora_Live_${encodeURIComponent((participantName || 'Call').replace(/\s+/g, '_'))}#config.prejoinPageEnabled=false`
+  );
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -36,9 +48,33 @@ export function VideoCallScreen({
       timer = setInterval(() => {
         setSeconds((prev) => prev + 1);
       }, 1000);
+
+      // Load current user and initiate call signaling in Firestore
+      (async () => {
+        try {
+          const u = await getStoredUser();
+          if (u) {
+            setCurrentUser(u);
+            if (conversationId && otherUserId) {
+              const initiated = await FirestoreChatService.initiateCall({
+                conversationId,
+                currentUser: u,
+                receiverId: otherUserId,
+                receiverName: participantName,
+                receiverAvatar: participantAvatar,
+                mode: 'video',
+              });
+              setCallId(initiated.callId);
+              setRoomUrl(initiated.roomUrl);
+            }
+          }
+        } catch (err) {
+          console.log('[VideoCallScreen] Signaling error:', err);
+        }
+      })();
     }
     return () => clearInterval(timer);
-  }, [visible]);
+  }, [visible, conversationId, otherUserId, participantName, participantAvatar]);
 
   const formatTimer = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -46,34 +82,55 @@ export function VideoCallScreen({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleOpenLiveVideo = async () => {
+    try {
+      await WebBrowser.openBrowserAsync(roomUrl);
+    } catch (e) {
+      console.log('[VideoCallScreen] WebBrowser open error:', e);
+    }
+  };
+
   const handleEndCall = async () => {
+    if (callId) {
+      await FirestoreChatService.endCall(callId).catch(() => {});
+    }
     await ChatService.addCallRecord({
-      participantName,
-      participantAvatar,
+      participantName: participantName || 'User',
+      participantAvatar: participantAvatar || '',
       participantRole: 'farmer',
       type: 'outgoing',
       callMode: 'video',
       timestamp: 'Just now',
       duration: formatTimer(seconds),
-    });
+    }).catch(() => {});
     onEndCall();
   };
+
+  const myInitial = (currentUser?.fullName || 'You').trim().charAt(0).toUpperCase();
+  const participantInitial = (participantName || 'F').trim().charAt(0).toUpperCase();
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false}>
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-        {/* Main Background Stream: High-res Farm Inspection view */}
-        <Image
-          source={{
-            uri: videoPaused
-              ? participantAvatar
-              : 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=1200&auto=format&fit=crop&q=80',
-          }}
-          style={styles.fullVideoStream}
-          contentFit="cover"
-        />
+        {/* Main Background Stream: Real avatar or stream placeholder backdrop */}
+        {participantAvatar && !videoPaused ? (
+          <Image
+            source={{ uri: participantAvatar }}
+            style={styles.fullVideoStream}
+            contentFit="cover"
+          />
+        ) : (
+          <View style={[styles.fullVideoStream, styles.emptyStreamBackdrop]}>
+            <View style={styles.centerAvatarBadge}>
+              <Text style={styles.centerAvatarText}>{participantInitial}</Text>
+            </View>
+            <Text style={styles.streamNoticeText}>
+              {videoPaused ? 'Video Feed Paused' : 'Live WebRTC Video Stream Active'}
+            </Text>
+          </View>
+        )}
 
         {/* Top Dark Gradient Header Overlay */}
         <SafeAreaView style={styles.topOverlay} edges={['top', 'left', 'right']}>
@@ -81,25 +138,35 @@ export function VideoCallScreen({
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={styles.liveRedDot} />
-                <Text style={styles.inspectionTitle}>Live Farm Inspection</Text>
+                <Text style={styles.inspectionTitle}>Live Farm Video Inspection</Text>
               </View>
-              <Text style={styles.participantName}>{participantName}</Text>
+              <Text style={styles.participantName}>{participantName || 'Participant'}</Text>
             </View>
             <View style={styles.timerBadge}>
               <Text style={styles.timerText}>{formatTimer(seconds)}</Text>
             </View>
           </View>
+
+          {/* Quick Connect Live WebRTC Button */}
+          <Pressable style={styles.openWebRtcBtn} onPress={handleOpenLiveVideo}>
+            <Text style={styles.openWebRtcIcon}>📹</Text>
+            <Text style={styles.openWebRtcText}>Connect HD Video Feed</Text>
+          </Pressable>
         </SafeAreaView>
 
         {/* Picture-in-Picture (Self Video Preview) */}
         <View style={styles.pipContainer}>
-          <Image
-            source={{
-              uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-            }}
-            style={styles.pipImage}
-            contentFit="cover"
-          />
+          {currentUser?.avatarUrl ? (
+            <Image
+              source={{ uri: currentUser.avatarUrl }}
+              style={styles.pipImage}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.pipImage, styles.pipFallbackBadge]}>
+              <Text style={styles.pipFallbackInitial}>{myInitial}</Text>
+            </View>
+          )}
           <View style={styles.pipLabelBadge}>
             <Text style={styles.pipLabelText}>You ({cameraFacing})</Text>
           </View>
@@ -292,5 +359,65 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
     fontWeight: '700',
+  },
+  emptyStreamBackdrop: {
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  centerAvatarBadge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#1E3A2F',
+    borderWidth: 3,
+    borderColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  centerAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 52,
+    fontWeight: '800',
+  },
+  streamNoticeText: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  openWebRtcBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 12,
+    alignSelf: 'center',
+    gap: 8,
+    shadowColor: '#10B981',
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  openWebRtcIcon: {
+    fontSize: 16,
+  },
+  openWebRtcText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pipFallbackBadge: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pipFallbackInitial: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '800',
   },
 });

@@ -36,9 +36,9 @@ const TAG_OPTIONS = [
 ];
 
 export function RateExperienceScreen({
-  farmerId = 'farmer-kusuma',
-  farmerName = 'Kusuma Bandara',
-  farmerAvatar = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
+  farmerId = '',
+  farmerName = 'Farmer',
+  farmerAvatar = '',
   onBack,
   onSubmitSuccess,
 }: RateExperienceScreenProps) {
@@ -117,7 +117,7 @@ export function RateExperienceScreen({
     try {
       const authorId = currentUser?.id || currentUser?._id || 'user-buyer-1';
       const authorName = currentUser?.fullName || 'Verified Commercial Buyer';
-      const authorAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
+      const authorAvatar = currentUser?.avatarUrl || '';
 
       if (existingReview) {
         // UPDATE existing review
@@ -266,7 +266,13 @@ export function RateExperienceScreen({
 
         {/* Farmer Card */}
         <View style={styles.farmerCard}>
-          <Image source={{ uri: farmerAvatar }} style={styles.farmerAvatar} contentFit="cover" />
+          {farmerAvatar ? (
+            <Image source={{ uri: farmerAvatar }} style={styles.farmerAvatar} contentFit="cover" />
+          ) : (
+            <View style={[styles.farmerAvatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarInitialText}>{(farmerName || 'F').trim().charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
           <View style={{ flex: 1, marginLeft: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={styles.farmerName}>{farmerName}</Text>
@@ -274,7 +280,7 @@ export function RateExperienceScreen({
                 <Text style={styles.verifiedText}>✓</Text>
               </View>
             </View>
-            <Text style={styles.farmSub}>Highland Valley Plots • Welimada</Text>
+            <Text style={styles.farmSub}>Registered Farmer • Direct Source</Text>
           </View>
         </View>
 
@@ -444,6 +450,16 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitialText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
   },
   farmerName: {
     fontSize: 16,
