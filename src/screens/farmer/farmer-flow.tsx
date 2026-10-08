@@ -42,6 +42,16 @@ import { PriceAlertsScreen } from '../communication/price-alerts-screen';
 import { HelpSupportScreen } from '../communication/help-support-screen';
 import { AgroToolsScreen } from '../communication/agro-tools-screen';
 import { FirestoreChatService, FirestoreCallSession } from '@/services/firestore-chat-service';
+import { ScheduleHarvestWizard } from './schedule-harvest-wizard';
+import { CreateAuctionWizard } from './create-auction-wizard';
+import { HarvestCalendarScreen } from '../buyer/harvest-calendar-screen';
+import { HarvestDetailScreen } from '../buyer/harvest-detail-screen';
+import { AuctionsHubScreen } from '../buyer/auctions-hub-screen';
+import { AuctionRoomScreen } from '../buyer/auction-room-screen';
+import { OrderTrackingScreen } from '../buyer/order-tracking-screen';
+import { HarvestItem } from '@/services/harvest-service';
+import { AuctionItem } from '@/services/auction-service';
+import { FarmoraOrder } from '@/services/order-service';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -66,7 +76,14 @@ export type FarmerScreenView =
   | 'notification-preferences'
   | 'price-alerts'
   | 'help-support'
-  | 'agro-tools';
+  | 'agro-tools'
+  | 'schedule-harvest'
+  | 'create-auction'
+  | 'harvest-calendar'
+  | 'harvest-detail'
+  | 'auctions-hub'
+  | 'auction-room'
+  | 'order-tracking';
 
 export type FarmerTab = 'dashboard' | 'products' | 'orders' | 'messages' | 'profile';
 
@@ -80,6 +97,9 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
   const [activeTab, setActiveTab] = useState<FarmerTab>('dashboard');
   const [newlyAddedTitle, setNewlyAddedTitle] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [selectedHarvest, setSelectedHarvest] = useState<HarvestItem | null>(null);
+  const [selectedAuction, setSelectedAuction] = useState<AuctionItem | null>(null);
+  const [trackingOrderId, setTrackingOrderId] = useState<string | null>(null);
 
   React.useEffect(() => {
     getStoredUser().then((u) => {
@@ -205,7 +225,14 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     currentView === 'notification-preferences' ||
     currentView === 'price-alerts' ||
     currentView === 'help-support' ||
-    currentView === 'agro-tools';
+    currentView === 'agro-tools' ||
+    currentView === 'schedule-harvest' ||
+    currentView === 'create-auction' ||
+    currentView === 'harvest-calendar' ||
+    currentView === 'harvest-detail' ||
+    currentView === 'auctions-hub' ||
+    currentView === 'auction-room' ||
+    currentView === 'order-tracking';
 
   return (
     <View style={styles.container}>
@@ -224,6 +251,10 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             onOpenTrustScore={() => setCurrentView('farmer-trust-score')}
             onOpenRescueProduce={() => setCurrentView('rescue-produce')}
             onOpenVerification={() => setCurrentView('verification')}
+            onOpenScheduleHarvest={() => setCurrentView('schedule-harvest')}
+            onOpenCreateAuction={() => setCurrentView('create-auction')}
+            onOpenHarvestCalendar={() => setCurrentView('harvest-calendar')}
+            onOpenAuctionsHub={() => setCurrentView('auctions-hub')}
           />
         )}
 
@@ -264,6 +295,10 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         {/* Real Interactive Orders Screen */}
         {currentView === 'orders' && (
           <FarmerOrdersScreen
+            onTrackOrder={(ord) => {
+              setTrackingOrderId(ord.id);
+              setCurrentView('order-tracking');
+            }}
             onChatBuyer={(buyerName, buyerId) => {
               handleStartChatWithBuyer(buyerId || 'buyer-1', buyerName);
             }}
@@ -453,6 +488,75 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             initialStep="checklist"
             onClose={() => setCurrentView('profile')}
             onFinish={() => setCurrentView('profile')}
+          />
+        )}
+
+        {currentView === 'schedule-harvest' && (
+          <ScheduleHarvestWizard
+            onBack={() => setCurrentView('dashboard')}
+            onHarvestCreated={(h) => {
+              setSelectedHarvest(h);
+              setCurrentView('harvest-calendar');
+            }}
+          />
+        )}
+
+        {currentView === 'create-auction' && (
+          <CreateAuctionWizard
+            onBack={() => setCurrentView('dashboard')}
+            onAuctionCreated={(a) => {
+              setSelectedAuction(a);
+              setCurrentView('auction-room');
+            }}
+          />
+        )}
+
+        {currentView === 'harvest-calendar' && (
+          <HarvestCalendarScreen
+            onBack={() => setCurrentView('dashboard')}
+            onFarmerSchedulePress={() => setCurrentView('schedule-harvest')}
+            onSelectHarvest={(h) => {
+              setSelectedHarvest(h);
+              setCurrentView('harvest-detail');
+            }}
+          />
+        )}
+
+        {currentView === 'harvest-detail' && selectedHarvest && (
+          <HarvestDetailScreen
+            harvest={selectedHarvest}
+            onBack={() => setCurrentView('harvest-calendar')}
+            onContactFarmer={(fId, fName) => {
+              handleStartChatWithBuyer(fId, fName);
+            }}
+          />
+        )}
+
+        {currentView === 'auctions-hub' && (
+          <AuctionsHubScreen
+            onBack={() => setCurrentView('dashboard')}
+            onCreateAuctionPress={() => setCurrentView('create-auction')}
+            onSelectAuction={(a) => {
+              setSelectedAuction(a);
+              setCurrentView('auction-room');
+            }}
+          />
+        )}
+
+        {currentView === 'auction-room' && selectedAuction && (
+          <AuctionRoomScreen
+            auction={selectedAuction}
+            onBack={() => setCurrentView('auctions-hub')}
+            onAuctionUpdated={(updated) => {
+              setSelectedAuction(updated);
+            }}
+          />
+        )}
+
+        {currentView === 'order-tracking' && (
+          <OrderTrackingScreen
+            orderId={trackingOrderId || 'ord-1042'}
+            onBack={() => setCurrentView('orders')}
           />
         )}
       </View>

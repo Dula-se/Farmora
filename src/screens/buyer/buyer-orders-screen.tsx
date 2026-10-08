@@ -22,6 +22,7 @@ interface BuyerOrdersScreenProps {
   onRateOrder: (order: FarmoraOrder) => void;
   onReportIssue: (order: FarmoraOrder) => void;
   onCallFarmer: (farmerName: string, farmerPhone: string, avatar: string) => void;
+  onTrackOrder?: (order: FarmoraOrder) => void;
 }
 
 export function BuyerOrdersScreen({
@@ -30,6 +31,7 @@ export function BuyerOrdersScreen({
   onRateOrder,
   onReportIssue,
   onCallFarmer,
+  onTrackOrder,
 }: BuyerOrdersScreenProps) {
   const [orders, setOrders] = useState<FarmoraOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'delivered'>('all');
@@ -262,6 +264,14 @@ export function BuyerOrdersScreen({
 
                 {/* Action Buttons */}
                 <View style={styles.cardActionsRow}>
+                  {onTrackOrder && (
+                    <Pressable
+                      style={[styles.invoiceBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
+                      onPress={() => onTrackOrder(ord)}>
+                      <Text style={[styles.invoiceBtnText, { color: '#166534', fontWeight: '800' }]}>📍 Track & PIN</Text>
+                    </Pressable>
+                  )}
+
                   <Pressable
                     style={styles.chatActionBtn}
                     onPress={() => onChatFarmer(ord.farmerName, ord.farmerId, ord.orderNumber)}>

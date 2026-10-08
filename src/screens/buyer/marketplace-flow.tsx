@@ -50,6 +50,16 @@ import { HelpSupportScreen } from '../communication/help-support-screen';
 import { AgroToolsScreen } from '../communication/agro-tools-screen';
 import { FirestoreChatService } from '@/services/firestore-chat-service';
 import { getStoredUser } from '@/services/api';
+import { CheckoutScreen } from './checkout-screen';
+import { OrderSuccessScreen } from './order-success-screen';
+import { OrderTrackingScreen } from './order-tracking-screen';
+import { HarvestCalendarScreen } from './harvest-calendar-screen';
+import { HarvestDetailScreen } from './harvest-detail-screen';
+import { AuctionsHubScreen } from './auctions-hub-screen';
+import { AuctionRoomScreen } from './auction-room-screen';
+import { FarmoraOrder, OrderItem } from '@/services/order-service';
+import { HarvestItem } from '@/services/harvest-service';
+import { AuctionItem } from '@/services/auction-service';
 
 export type BuyerScreenView =
   | 'home'
@@ -82,7 +92,14 @@ export type BuyerScreenView =
   | 'notification-preferences'
   | 'price-alerts'
   | 'help-support'
-  | 'agro-tools';
+  | 'agro-tools'
+  | 'checkout'
+  | 'order-success'
+  | 'order-tracking'
+  | 'harvest-calendar'
+  | 'harvest-detail'
+  | 'auctions-hub'
+  | 'auction-room';
 
 export type BuyerTab = 'home' | 'market' | 'messages' | 'wishlist' | 'profile';
 
@@ -158,6 +175,12 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     name: '',
     avatar: '',
   });
+
+  const [completedOrder, setCompletedOrder] = useState<FarmoraOrder | null>(null);
+  const [trackingOrderId, setTrackingOrderId] = useState<string | null>(null);
+  const [selectedHarvest, setSelectedHarvest] = useState<HarvestItem | null>(null);
+  const [selectedAuction, setSelectedAuction] = useState<AuctionItem | null>(null);
+  const [directCheckoutItems, setDirectCheckoutItems] = useState<OrderItem[] | undefined>(undefined);
 
   const handleSelectCategory = (id: string, name: string) => {
     setSelectedCategory({ id, name });
@@ -248,7 +271,14 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     currentView === 'notification-preferences' ||
     currentView === 'price-alerts' ||
     currentView === 'help-support' ||
-    currentView === 'agro-tools';
+    currentView === 'agro-tools' ||
+    currentView === 'checkout' ||
+    currentView === 'order-success' ||
+    currentView === 'order-tracking' ||
+    currentView === 'harvest-calendar' ||
+    currentView === 'harvest-detail' ||
+    currentView === 'auctions-hub' ||
+    currentView === 'auction-room';
 
   return (
     <View style={styles.container}>
@@ -265,6 +295,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenProductScanner={() => setCurrentView('product-scanner')}
             onOpenWishlist={() => setCurrentView('wishlist')}
             onOpenCart={() => setCurrentView('cart')}
+            onOpenHarvestCalendar={() => setCurrentView('harvest-calendar')}
+            onOpenAuctionsHub={() => setCurrentView('auctions-hub')}
             onOpenOrders={() => setCurrentView('buyer-orders')}
             onOpenChats={() => setCurrentView('messages')}
             onOpenProfile={() => setCurrentView('profile')}
@@ -309,10 +341,18 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             product={selectedProduct}
             onBack={() => setCurrentView('home')}
             onOrderNow={(prod, qty) => {
-              Alert.alert(
-                'Order Placed! 📦',
-                `Your order for ${qty} ${prod.unit} of ${prod.title} has been routed to the farmer. Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`
-              );
+              setDirectCheckoutItems([
+                {
+                  produceId: prod.id || (prod as any)._id,
+                  produceTitle: prod.title,
+                  quantity: qty,
+                  unit: prod.unit || 'kg',
+                  unitPrice: prod.pricePerUnit,
+                  totalPrice: prod.pricePerUnit * qty,
+                  image: prod.images?.[0] || 'https://images.unsplash.com/photo-1618512496248-a07fe83aa8cb?w=600&fit=crop',
+                },
+              ]);
+              setCurrentView('checkout');
             }}
             onChatFarmer={() => {
               handleStartChatWithFarmer(
@@ -400,6 +440,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <CartScreen
             onBack={() => setCurrentView('home')}
             onExploreMarketplace={() => setCurrentView('home')}
+            onProceedToCheckout={() => {
+              setDirectCheckoutItems(undefined);
+              setCurrentView('checkout');
+            }}
           />
         )}
 
@@ -572,6 +616,10 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
         {currentView === 'buyer-orders' && (
           <BuyerOrdersScreen
             onBack={() => setCurrentView('home')}
+            onTrackOrder={(order) => {
+              setTrackingOrderId(order.id);
+              setCurrentView('order-tracking');
+            }}
             onChatFarmer={(farmerName, farmerId) => {
               handleStartChatWithFarmer(farmerId || 'farmer-1', farmerName);
             }}
@@ -659,6 +707,81 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
                 setSelectedFarmer((prev) => ({ ...prev, id: f.id, name: f.name || prev.name }));
               }
               setCurrentView('farm-map');
+            }}
+          />
+        )}
+
+        {currentView === 'checkout' && (
+          <CheckoutScreen
+            directItems={directCheckoutItems}
+            onBack={() => setCurrentView(directCheckoutItems ? 'product-detail' : 'cart')}
+            onOrderSuccess={(ord) => {
+              setCompletedOrder(ord);
+              setCurrentView('order-success');
+            }}
+          />
+        )}
+
+        {currentView === 'order-success' && completedOrder && (
+          <OrderSuccessScreen
+            order={completedOrder}
+            onTrackOrder={(ordId) => {
+              setTrackingOrderId(ordId);
+              setCurrentView('order-tracking');
+            }}
+            onHomePress={() => setCurrentView('home')}
+          />
+        )}
+
+        {currentView === 'order-tracking' && (
+          <OrderTrackingScreen
+            orderId={trackingOrderId || completedOrder?.id || 'ord-1042'}
+            onBack={() => setCurrentView('buyer-orders')}
+            onChatWithFarmer={(fId, fName) => {
+              handleStartChatWithFarmer(fId, fName);
+            }}
+          />
+        )}
+
+        {currentView === 'harvest-calendar' && (
+          <HarvestCalendarScreen
+            onBack={() => setCurrentView('home')}
+            onSelectHarvest={(harv) => {
+              setSelectedHarvest(harv);
+              setCurrentView('harvest-detail');
+            }}
+          />
+        )}
+
+        {currentView === 'harvest-detail' && selectedHarvest && (
+          <HarvestDetailScreen
+            harvest={selectedHarvest}
+            onBack={() => setCurrentView('harvest-calendar')}
+            onContactFarmer={(fId, fName) => {
+              handleStartChatWithFarmer(fId, fName);
+            }}
+            onPreOrderSuccess={(updated) => {
+              setSelectedHarvest(updated);
+            }}
+          />
+        )}
+
+        {currentView === 'auctions-hub' && (
+          <AuctionsHubScreen
+            onBack={() => setCurrentView('home')}
+            onSelectAuction={(auc) => {
+              setSelectedAuction(auc);
+              setCurrentView('auction-room');
+            }}
+          />
+        )}
+
+        {currentView === 'auction-room' && selectedAuction && (
+          <AuctionRoomScreen
+            auction={selectedAuction}
+            onBack={() => setCurrentView('auctions-hub')}
+            onAuctionUpdated={(updated) => {
+              setSelectedAuction(updated);
             }}
           />
         )}

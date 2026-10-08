@@ -41,6 +41,8 @@ interface BuyerHomeScreenProps {
   onOpenProductScanner?: () => void;
   onOpenWishlist?: () => void;
   onOpenCart?: () => void;
+  onOpenHarvestCalendar?: () => void;
+  onOpenAuctionsHub?: () => void;
   onSelectFarmer?: (farmer: {
     id: string;
     name: string;
@@ -74,6 +76,8 @@ export function BuyerHomeScreen({
   onOpenProductScanner,
   onOpenWishlist,
   onOpenCart,
+  onOpenHarvestCalendar,
+  onOpenAuctionsHub,
   onSelectFarmer,
 }: BuyerHomeScreenProps) {
   const { totalCount: cartCount, addToCart } = useCart();
@@ -413,6 +417,35 @@ export function BuyerHomeScreen({
               <Text style={styles.quickToolSub}>Quality & price audit</Text>
             </View>
             <Text style={styles.quickToolArrow}>›</Text>
+          </Pressable>
+        </View>
+
+        {/* Harvest Schedule & Live Auctions Cards */}
+        <View style={styles.quickToolsContainer}>
+          <Pressable
+            style={[styles.quickToolCard, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
+            onPress={onOpenHarvestCalendar}>
+            <View style={[styles.quickToolIcon, { backgroundColor: '#DCFCE7' }]}>
+              <Text style={{ fontSize: 18 }}>📅</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.quickToolTitle, { color: '#14532D' }]}>Harvest Pre-Order</Text>
+              <Text style={styles.quickToolSub}>Book upcoming batches</Text>
+            </View>
+            <Text style={[styles.quickToolArrow, { color: '#16A34A' }]}>›</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.quickToolCard, { borderColor: '#FECACA', backgroundColor: '#FEF2F2' }]}
+            onPress={onOpenAuctionsHub}>
+            <View style={[styles.quickToolIcon, { backgroundColor: '#FEE2E2' }]}>
+              <Text style={{ fontSize: 18 }}>🔨</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.quickToolTitle, { color: '#7F1D1D' }]}>Produce Bidding</Text>
+              <Text style={styles.quickToolSub}>Wholesale live auctions</Text>
+            </View>
+            <Text style={[styles.quickToolArrow, { color: '#DC2626' }]}>›</Text>
           </Pressable>
         </View>
 

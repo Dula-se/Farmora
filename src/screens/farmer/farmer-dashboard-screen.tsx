@@ -27,6 +27,10 @@ interface FarmerDashboardScreenProps {
   onOpenTrustScore?: () => void;
   onOpenRescueProduce?: () => void;
   onOpenVerification?: () => void;
+  onOpenScheduleHarvest?: () => void;
+  onOpenCreateAuction?: () => void;
+  onOpenHarvestCalendar?: () => void;
+  onOpenAuctionsHub?: () => void;
 }
 
 interface FarmerOrderSummary {
@@ -75,6 +79,10 @@ export function FarmerDashboardScreen({
   onOpenTrustScore,
   onOpenRescueProduce,
   onOpenVerification,
+  onOpenScheduleHarvest,
+  onOpenCreateAuction,
+  onOpenHarvestCalendar,
+  onOpenAuctionsHub,
 }: FarmerDashboardScreenProps) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [myListings, setMyListings] = useState<ApiProduceItem[]>([]);
@@ -472,6 +480,69 @@ export function FarmerDashboardScreen({
                     <Text style={styles.rescueOpenBtnText}>Open</Text>
                   </View>
                 </View>
+              </Pressable>
+            </View>
+
+            {/* Harvest Pre-Orders & Live Produce Auctions Block */}
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>Harvest & Wholesale Bidding Hub</Text>
+
+              {/* Schedule Harvest Wizard */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenScheduleHarvest}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#DCFCE7' }]}>
+                  <Text style={{ fontSize: 20 }}>📅</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.intelHeaderRow}>
+                    <Text style={styles.intelCardTitle}>Schedule Upcoming Harvest</Text>
+                    <View style={[styles.trustBadge, { backgroundColor: '#DCFCE7' }]}>
+                      <Text style={[styles.trustBadgeText, { color: '#15803D' }]}>PRE-ORDERS</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.intelCardSub}>
+                    Publish crop batch yield, expected date & accept buyer deposits
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* Create Wholesale Auction */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenCreateAuction}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#FEE2E2' }]}>
+                  <Text style={{ fontSize: 20 }}>🔨</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.intelHeaderRow}>
+                    <Text style={styles.intelCardTitle}>Launch Live Auction Lot</Text>
+                    <View style={[styles.trustBadge, { backgroundColor: '#FEE2E2' }]}>
+                      <Text style={[styles.trustBadgeText, { color: '#DC2626' }]}>LIVE BID</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.intelCardSub}>
+                    Start wholesale produce bidding with reserve price & timer
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
+              </Pressable>
+
+              {/* Browse Live Auctions */}
+              <Pressable
+                style={styles.intelCard}
+                onPress={onOpenAuctionsHub}>
+                <View style={[styles.intelIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                  <Text style={{ fontSize: 20 }}>📊</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.intelCardTitle}>View Live Produce Auctions</Text>
+                  <Text style={styles.intelCardSub}>
+                    Track active bids, highest offers, and won wholesale lots
+                  </Text>
+                </View>
+                <Text style={styles.intelArrow}>›</Text>
               </Pressable>
             </View>
 

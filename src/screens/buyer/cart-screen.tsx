@@ -19,12 +19,14 @@ interface CartScreenProps {
   onBack: () => void;
   onSelectProduct?: (produceId: string) => void;
   onExploreMarketplace?: () => void;
+  onProceedToCheckout?: () => void;
 }
 
 export function CartScreen({
   onBack,
   onSelectProduct,
   onExploreMarketplace,
+  onProceedToCheckout,
 }: CartScreenProps) {
   const insets = useSafeAreaInsets();
   const {
@@ -47,8 +49,11 @@ export function CartScreen({
       Alert.alert('Empty Cart', 'Please add some items to your cart before proceeding to checkout.');
       return;
     }
-    // Checkout button display modal as requested
-    setShowCheckoutModal(true);
+    if (onProceedToCheckout) {
+      onProceedToCheckout();
+    } else {
+      setShowCheckoutModal(true);
+    }
   };
 
   const handleClearAll = () => {

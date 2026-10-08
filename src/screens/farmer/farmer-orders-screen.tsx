@@ -21,6 +21,7 @@ interface FarmerOrdersScreenProps {
   onChatBuyer: (buyerName: string, buyerId: string, orderRef?: string) => void;
   onRateBuyer: (buyerName: string, buyerId: string) => void;
   onCallBuyer: (buyerName: string, buyerPhone: string) => void;
+  onTrackOrder?: (order: FarmoraOrder) => void;
 }
 
 export function FarmerOrdersScreen({
@@ -28,6 +29,7 @@ export function FarmerOrdersScreen({
   onChatBuyer,
   onRateBuyer,
   onCallBuyer,
+  onTrackOrder,
 }: FarmerOrdersScreenProps) {
   const [orders, setOrders] = useState<FarmoraOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'dispatched' | 'delivered'>('all');
@@ -298,6 +300,14 @@ export function FarmerOrdersScreen({
                       style={styles.markDeliveredBtn}
                       onPress={() => handleMarkDelivered(ord)}>
                       <Text style={styles.markDeliveredBtnText}>✓ Mark Delivered</Text>
+                    </Pressable>
+                  )}
+
+                  {onTrackOrder && (
+                    <Pressable
+                      style={[styles.chatBtn, { backgroundColor: '#F0FDF4', borderColor: '#86EFAC', borderWidth: 1 }]}
+                      onPress={() => onTrackOrder(ord)}>
+                      <Text style={[styles.chatBtnText, { color: '#166534', fontWeight: '800' }]}>📍 Track & PIN</Text>
                     </Pressable>
                   )}
 
