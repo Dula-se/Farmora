@@ -6,5 +6,6 @@ const router = Router();
 router.get('/config', PaymentController.getConfig);
 router.post('/create-intent', PaymentController.createPaymentIntent);
 router.post('/confirm', PaymentController.confirmPayment);
+router.post('/process-card', PaymentController.processCardPayment);
 
 export default router;

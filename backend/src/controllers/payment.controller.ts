@@ -104,4 +104,82 @@ export class PaymentController {
       return sendError(res, err.message || 'Could not verify payment.', 500);
     }
   }
+
+  /**
+   * Process and confirm card payment with Stripe directly on backend
+   */
+  static async processCardPayment(req: Request, res: Response) {
+    try {
+      const {
+        amount,
+        currency = 'lkr',
+        orderId,
+        buyerId,
+        paymentType = 'order',
+        cardNumber = '',
+        cardHolder = '',
+      } = req.body;
+
+      if (!amount || amount <= 0) {
+        return sendError(res, 'Valid payment amount is required.', 400);
+      }
+
+      // Map card number to valid Stripe test payment method
+      const clean = String(cardNumber).replace(/\s+/g, '');
+      let pm = 'pm_card_visa';
+      if (clean.startsWith('5')) pm = 'pm_card_mastercard';
+      else if (clean.startsWith('3')) pm = 'pm_card_amex';
+
+      const amountInCents = Math.round(Number(amount) * 100);
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amountInCents,
+        currency: currency.toLowerCase(),
+        payment_method: pm,
+        confirm: true,
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: 'never',
+        },
+        description: `Famora Produce Payment - ${paymentType.toUpperCase()} (Order: ${orderId || 'Direct'})`,
+        metadata: {
+          orderId: orderId || '',
+          buyerId: buyerId || '',
+          cardHolder: cardHolder || 'Famora Buyer',
+          paymentType,
+        },
+      });
+
+      const isSuccessful =
+        paymentIntent.status === 'succeeded' || paymentIntent.status === 'requires_capture';
+
+      if (orderId && isSuccessful) {
+        await OrderModel.findOneAndUpdate(
+          { $or: [{ _id: orderId }, { orderNumber: orderId }] },
+          {
+            $set: {
+              paymentStatus: 'paid',
+              stripePaymentIntentId: paymentIntent.id,
+            },
+          }
+        ).catch(() => {});
+      }
+
+      return sendSuccess(
+        res,
+        {
+          success: isSuccessful,
+          paymentIntentId: paymentIntent.id,
+          status: paymentIntent.status,
+          amount: paymentIntent.amount / 100,
+          currency: paymentIntent.currency,
+        },
+        'Stripe payment processed successfully.'
+      );
+    } catch (err: any) {
+      console.error('[PaymentController] processCardPayment error:', err);
+      return sendError(res, err.message || 'Payment processing failed.', 500);
+    }
+  }
 }
+

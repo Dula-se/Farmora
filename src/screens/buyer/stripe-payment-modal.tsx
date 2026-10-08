@@ -106,19 +106,6 @@ export function StripePaymentModal({
     setErrorMsg(null);
 
     try {
-      // 1. Create PaymentIntent on Backend
-      const intentRes = await StripeService.createPaymentIntent({
-        amount,
-        currency: 'lkr',
-        orderId,
-        paymentType,
-        metadata: {
-          client: 'Famora Mobile App',
-          cardHolder,
-        },
-      });
-
-      // 2. Tokenize card details via Stripe REST API
       const cardDetails: CardDetails = {
         number: cleanNum,
         expMonth: month,
@@ -128,20 +115,19 @@ export function StripePaymentModal({
         postalCode: postalCode.trim(),
       };
 
-      const cardToken = await StripeService.tokenizeCard(cardDetails);
-
-      // 3. Confirm Payment
-      const confirmRes = await StripeService.confirmCardPayment({
-        clientSecret: intentRes.clientSecret,
-        cardToken,
+      const result = await StripeService.processCardPayment({
+        amount,
+        currency: 'lkr',
         orderId,
+        paymentType,
+        card: cardDetails,
       });
 
-      if (confirmRes.success) {
+      if (result.success) {
         setIsProcessing(false);
-        onSuccess(confirmRes.paymentIntentId);
+        onSuccess(result.paymentIntentId);
       } else {
-        throw new Error(`Payment status: ${confirmRes.status}`);
+        throw new Error(`Payment status: ${result.status}`);
       }
     } catch (err: any) {
       console.error('[StripePaymentModal] error:', err);
