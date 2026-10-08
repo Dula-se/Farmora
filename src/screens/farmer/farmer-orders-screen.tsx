@@ -39,6 +39,9 @@ export function FarmerOrdersScreen({
   const [driverPhone, setDriverPhone] = useState('+94 77 333 4455');
   const [vehicleNo, setVehicleNo] = useState('WP-GA-9021');
 
+  // Buyer Info & Rating modal
+  const [selectedBuyerOrder, setSelectedBuyerOrder] = useState<FarmoraOrder | null>(null);
+
   useEffect(() => {
     loadOrders();
   }, []);
@@ -229,21 +232,29 @@ export function FarmerOrdersScreen({
                   </View>
                 </View>
 
-                {/* Buyer Details */}
-                <View style={styles.buyerRow}>
+                {/* Buyer Details (Tap to view buyer info & manage ratings) */}
+                <Pressable
+                  style={({ pressed }) => [styles.buyerRow, pressed && { opacity: 0.95 }]}
+                  onPress={() => setSelectedBuyerOrder(ord)}>
                   <View style={styles.buyerAvatar}>
                     <Text style={{ fontSize: 18 }}>👨‍💼</Text>
                   </View>
                   <View style={{ flex: 1, marginLeft: 10 }}>
                     <Text style={styles.buyerName}>{ord.buyerName}</Text>
                     <Text style={styles.buyerLoc}>📍 {ord.buyerLocation}</Text>
+                    <Text style={{ fontSize: 10, color: '#166534', fontWeight: '700', marginTop: 1 }}>
+                      ⭐ Tap card to view info & rate buyer ›
+                    </Text>
                   </View>
                   <Pressable
                     style={styles.callIconBtn}
-                    onPress={() => onCallBuyer(ord.buyerName, ord.buyerPhone)}>
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      onCallBuyer(ord.buyerName, ord.buyerPhone);
+                    }}>
                     <Text style={{ fontSize: 15 }}>📞</Text>
                   </Pressable>
-                </View>
+                </Pressable>
 
                 {/* Items */}
                 <View style={styles.itemsBox}>
@@ -362,6 +373,96 @@ export function FarmerOrdersScreen({
                 style={styles.modalConfirmBtn}
                 onPress={handleConfirmDispatch}>
                 <Text style={styles.modalConfirmBtnText}>Confirm & Start Transit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Buyer Info & Ratings Modal */}
+      <Modal
+        visible={!!selectedBuyerOrder}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedBuyerOrder(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.buyerInfoModalCard}>
+            <View style={styles.buyerModalHeader}>
+              <View style={styles.buyerAvatar}>
+                <Text style={{ fontSize: 24 }}>👨‍💼</Text>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.buyerModalName}>{selectedBuyerOrder?.buyerName}</Text>
+                <Text style={styles.buyerModalLoc}>📍 {selectedBuyerOrder?.buyerLocation}</Text>
+                <Text style={styles.buyerModalBadge}>✓ Commercial Procurement Partner</Text>
+              </View>
+              <Pressable
+                hitSlop={10}
+                onPress={() => setSelectedBuyerOrder(null)}
+                style={styles.modalCloseCircle}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#64748B' }}>✕</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.buyerStatsRow}>
+              <View style={styles.buyerStatBox}>
+                <Text style={styles.buyerStatValue}>4.9 ★</Text>
+                <Text style={styles.buyerStatLabel}>Trust Score</Text>
+              </View>
+              <View style={styles.buyerStatBox}>
+                <Text style={styles.buyerStatValue}>100%</Text>
+                <Text style={styles.buyerStatLabel}>Payment Rate</Text>
+              </View>
+              <View style={styles.buyerStatBox}>
+                <Text style={styles.buyerStatValue}>{selectedBuyerOrder?.orderNumber}</Text>
+                <Text style={styles.buyerStatLabel}>Active Order</Text>
+              </View>
+            </View>
+
+            <View style={styles.buyerModalDetailsBlock}>
+              <Text style={styles.buyerModalDetailRow}>
+                📞 Contact: <Text style={{ fontWeight: '700', color: '#0F172A' }}>{selectedBuyerOrder?.buyerPhone}</Text>
+              </Text>
+              <Text style={styles.buyerModalDetailRow}>
+                💰 Order Total: <Text style={{ fontWeight: '700', color: '#166534' }}>Rs. {selectedBuyerOrder?.totalAmount.toLocaleString()}</Text>
+              </Text>
+              <Text style={styles.buyerModalDetailRow}>
+                🛡️ Payment Status: <Text style={{ fontWeight: '700', color: '#1E40AF' }}>{selectedBuyerOrder?.paymentStatus}</Text>
+              </Text>
+            </View>
+
+            <View style={styles.buyerModalActionRow}>
+              <Pressable
+                style={styles.buyerModalActionBtn}
+                onPress={() => {
+                  if (!selectedBuyerOrder) return;
+                  const b = selectedBuyerOrder;
+                  setSelectedBuyerOrder(null);
+                  onChatBuyer(b.buyerName, b.buyerId, b.orderNumber);
+                }}>
+                <Text style={styles.buyerModalActionText}>💬 Chat</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.buyerModalActionBtn}
+                onPress={() => {
+                  if (!selectedBuyerOrder) return;
+                  const b = selectedBuyerOrder;
+                  setSelectedBuyerOrder(null);
+                  onCallBuyer(b.buyerName, b.buyerPhone);
+                }}>
+                <Text style={styles.buyerModalActionText}>📞 Call</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.buyerModalRateBtn}
+                onPress={() => {
+                  if (!selectedBuyerOrder) return;
+                  const b = selectedBuyerOrder;
+                  setSelectedBuyerOrder(null);
+                  onRateBuyer(b.buyerName, b.buyerId);
+                }}>
+                <Text style={styles.buyerModalRateText}>⭐ Rate / Edit Rating</Text>
               </Pressable>
             </View>
           </View>
@@ -760,6 +861,104 @@ const styles = StyleSheet.create({
   modalConfirmBtnText: {
     fontSize: 13,
     fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  buyerInfoModalCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+  },
+  buyerModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  buyerModalName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  buyerModalLoc: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  buyerModalBadge: {
+    fontSize: 11,
+    color: '#15803D',
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  modalCloseCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buyerStatsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    justifyContent: 'space-between',
+  },
+  buyerStatBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  buyerStatValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  buyerStatLabel: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  buyerModalDetailsBlock: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    gap: 6,
+  },
+  buyerModalDetailRow: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  buyerModalActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  buyerModalActionBtn: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  buyerModalActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  buyerModalRateBtn: {
+    flex: 2,
+    backgroundColor: '#1E5E3A',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  buyerModalRateText: {
+    fontSize: 13,
+    fontWeight: '800',
     color: '#FFFFFF',
   },
 });

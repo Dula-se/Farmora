@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Alert,
   Pressable,
@@ -12,7 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { ChatService } from '@/services/chat-service';
+import { RatingService, RatingReview } from '@/services/rating-service';
+import { getStoredUser, ApiUser } from '@/services/api';
 
 interface RateBuyerScreenProps {
   buyerId?: string;
@@ -37,6 +38,10 @@ export function RateBuyerScreen({
   onBack,
   onSubmitSuccess,
 }: RateBuyerScreenProps) {
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [existingReview, setExistingReview] = useState<RatingReview | null>(null);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+
   const [overallRating, setOverallRating] = useState(5);
   const [paymentRating, setPaymentRating] = useState(5);
   const [commRating, setCommRating] = useState(5);
@@ -47,6 +52,33 @@ export function RateBuyerScreen({
   ]);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const u = await getStoredUser();
+        setCurrentUser(u);
+        const authorId = u?.id || u?._id || 'user-farmer-1';
+        const found = await RatingService.getMyReviewForTarget(authorId, buyerId);
+        if (found) {
+          setExistingReview(found);
+          setOverallRating(found.overallRating || 5);
+          if (found.criteriaRatings) {
+            setPaymentRating(found.criteriaRatings.paymentPromptness || 5);
+            setCommRating(found.criteriaRatings.communication || 5);
+          }
+          if (found.tags && found.tags.length > 0) setSelectedTags(found.tags);
+          if (found.comment) setComment(found.comment);
+        }
+      } catch (err) {
+        console.warn('Error loading buyer review:', err);
+      } finally {
+        setLoadingInitial(false);
+      }
+    }
+    loadData();
+  }, [buyerId]);
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -59,38 +91,101 @@ export function RateBuyerScreen({
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      await ChatService.submitReview({
-        targetId: buyerId,
-        authorName: 'Verified Highland Farmer',
-        authorRole: 'farmer',
-        authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
-        overallRating,
-        criteriaRatings: {
-          paymentPromptness: paymentRating,
-          communication: commRating,
-        },
-        tags: selectedTags,
-        comment: comment.trim() || 'Payment was cleared promptly upon crate dispatch.',
-      });
+      const authorId = currentUser?.id || currentUser?._id || 'user-farmer-1';
+      const authorName = currentUser?.fullName || 'Verified Highland Farmer';
+      const authorAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400';
 
-      Alert.alert(
-        'Buyer Rated! ⭐',
-        `Thank you for evaluating ${buyerName}. Your feedback helps maintain a trusted marketplace for all farmers.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (onSubmitSuccess) onSubmitSuccess();
-              else onBack();
-            },
+      if (existingReview) {
+        // UPDATE existing review
+        await RatingService.updateReview(existingReview.id, {
+          overallRating,
+          criteriaRatings: {
+            paymentPromptness: paymentRating,
+            communication: commRating,
           },
-        ]
-      );
+          tags: selectedTags,
+          comment: comment.trim() || 'Payment was cleared promptly upon crate dispatch.',
+        });
+
+        Alert.alert(
+          'Buyer Rating Updated! ⭐',
+          `Your rating for ${buyerName} has been updated.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onSubmitSuccess) onSubmitSuccess();
+                else onBack();
+              },
+            },
+          ]
+        );
+      } else {
+        // CREATE new review
+        await RatingService.submitReview({
+          targetId: buyerId,
+          targetName: buyerName,
+          targetRole: 'buyer',
+          authorId,
+          authorName,
+          authorRole: 'farmer',
+          authorAvatar,
+          overallRating,
+          criteriaRatings: {
+            paymentPromptness: paymentRating,
+            communication: commRating,
+          },
+          tags: selectedTags,
+          comment: comment.trim() || 'Payment was cleared promptly upon crate dispatch.',
+        });
+
+        Alert.alert(
+          'Buyer Rated! ⭐',
+          `Thank you for evaluating ${buyerName}. Your feedback helps maintain a trusted marketplace for all farmers.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onSubmitSuccess) onSubmitSuccess();
+                else onBack();
+              },
+            },
+          ]
+        );
+      }
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Could not submit rating.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDelete = () => {
+    if (!existingReview) return;
+    Alert.alert(
+      'Delete Buyer Rating? 🗑️',
+      `Are you sure you want to delete your rating for ${buyerName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await RatingService.deleteReview(existingReview.id);
+              Alert.alert('Deleted', 'Buyer rating has been removed.');
+              if (onSubmitSuccess) onSubmitSuccess();
+              else onBack();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete rating.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const renderStars = (rating: number, onSelect: (r: number) => void, size = 26) => (
@@ -121,6 +216,24 @@ export function RateBuyerScreen({
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Existing review notice if already rated */}
+        {existingReview && (
+          <View style={styles.existingNotice}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.existingNoticeTitle}>✏️ Editing Existing Buyer Rating</Text>
+              <Text style={styles.existingNoticeSub}>
+                You previously rated this buyer. You can update your feedback or delete it.
+              </Text>
+            </View>
+            <Pressable
+              style={styles.deleteQuickBtn}
+              onPress={handleDelete}
+              disabled={deleting}>
+              <Text style={styles.deleteQuickBtnText}>🗑️ Delete</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Buyer Summary Card */}
         <View style={styles.buyerCard}>
           <Image source={{ uri: buyerAvatar }} style={styles.buyerAvatar} contentFit="cover" />
@@ -194,15 +307,33 @@ export function RateBuyerScreen({
           />
         </View>
 
-        {/* Submit Button */}
+        {/* Submit / Update Button */}
         <Pressable
           style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
           disabled={submitting}
           onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>
-            {submitting ? 'Submitting...' : 'Submit Buyer Rating'}
+            {submitting
+              ? existingReview
+                ? 'Updating...'
+                : 'Submitting...'
+              : existingReview
+              ? 'Update Buyer Rating ⭐'
+              : 'Submit Buyer Rating'}
           </Text>
         </Pressable>
+
+        {/* Delete Button (if existing) */}
+        {existingReview && (
+          <Pressable
+            style={[styles.deleteBtn, deleting && { opacity: 0.7 }]}
+            disabled={deleting}
+            onPress={handleDelete}>
+            <Text style={styles.deleteBtnText}>
+              {deleting ? 'Deleting...' : '🗑️ Delete This Rating'}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -343,6 +474,53 @@ const styles = StyleSheet.create({
   submitBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '800',
+  },
+  existingNotice: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  existingNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+  },
+  existingNoticeSub: {
+    fontSize: 11,
+    color: '#3B82F6',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  deleteQuickBtn: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  deleteQuickBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  deleteBtn: {
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  deleteBtnText: {
+    color: '#E11D48',
+    fontSize: 14,
     fontWeight: '800',
   },
 });

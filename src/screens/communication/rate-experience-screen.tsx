@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   Pressable,
@@ -13,7 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { ChatService } from '@/services/chat-service';
+import { RatingService, RatingReview } from '@/services/rating-service';
+import { getStoredUser, ApiUser } from '@/services/api';
 import { promptMediaSource } from '@/services/media-picker';
 
 interface RateExperienceScreenProps {
@@ -40,6 +42,10 @@ export function RateExperienceScreen({
   onBack,
   onSubmitSuccess,
 }: RateExperienceScreenProps) {
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [existingReview, setExistingReview] = useState<RatingReview | null>(null);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+
   const [overallRating, setOverallRating] = useState(5);
   const [qualityRating, setQualityRating] = useState(5);
   const [freshnessRating, setFreshnessRating] = useState(5);
@@ -53,6 +59,36 @@ export function RateExperienceScreen({
   const [comment, setComment] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const u = await getStoredUser();
+        setCurrentUser(u);
+        const authorId = u?.id || u?._id || 'user-buyer-1';
+        const found = await RatingService.getMyReviewForTarget(authorId, farmerId);
+        if (found) {
+          setExistingReview(found);
+          setOverallRating(found.overallRating || 5);
+          if (found.criteriaRatings) {
+            setQualityRating(found.criteriaRatings.quality || 5);
+            setFreshnessRating(found.criteriaRatings.freshness || 5);
+            setPackagingRating(found.criteriaRatings.packaging || 4);
+            setCommRating(found.criteriaRatings.communication || 5);
+          }
+          if (found.tags && found.tags.length > 0) setSelectedTags(found.tags);
+          if (found.comment) setComment(found.comment);
+          if (found.images && found.images.length > 0) setPhotos(found.images);
+        }
+      } catch (err) {
+        console.warn('Error loading review:', err);
+      } finally {
+        setLoadingInitial(false);
+      }
+    }
+    loadData();
+  }, [farmerId]);
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -79,41 +115,107 @@ export function RateExperienceScreen({
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      await ChatService.submitReview({
-        targetId: farmerId,
-        authorName: 'Verified Commercial Buyer',
-        authorRole: 'buyer',
-        authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-        overallRating,
-        criteriaRatings: {
-          quality: qualityRating,
-          freshness: freshnessRating,
-          packaging: packagingRating,
-          communication: commRating,
-        },
-        tags: selectedTags,
-        comment: comment.trim() || 'Produce was received in excellent condition.',
-        images: photos,
-      });
+      const authorId = currentUser?.id || currentUser?._id || 'user-buyer-1';
+      const authorName = currentUser?.fullName || 'Verified Commercial Buyer';
+      const authorAvatar = currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
 
-      Alert.alert(
-        'Review Submitted! ⭐',
-        'Thank you for rating your farm produce experience. Your feedback builds Sri Lanka\'s direct agricultural trust network.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (onSubmitSuccess) onSubmitSuccess();
-              else onBack();
-            },
+      if (existingReview) {
+        // UPDATE existing review
+        await RatingService.updateReview(existingReview.id, {
+          overallRating,
+          criteriaRatings: {
+            quality: qualityRating,
+            freshness: freshnessRating,
+            packaging: packagingRating,
+            communication: commRating,
           },
-        ]
-      );
+          tags: selectedTags,
+          comment: comment.trim() || 'Produce was received in excellent condition.',
+          images: photos,
+        });
+
+        Alert.alert(
+          'Rating Updated! ⭐',
+          'Your feedback for this farmer has been updated successfully.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onSubmitSuccess) onSubmitSuccess();
+                else onBack();
+              },
+            },
+          ]
+        );
+      } else {
+        // CREATE new review
+        await RatingService.submitReview({
+          targetId: farmerId,
+          targetName: farmerName,
+          targetRole: 'farmer',
+          authorId,
+          authorName,
+          authorRole: 'buyer',
+          authorAvatar,
+          overallRating,
+          criteriaRatings: {
+            quality: qualityRating,
+            freshness: freshnessRating,
+            packaging: packagingRating,
+            communication: commRating,
+          },
+          tags: selectedTags,
+          comment: comment.trim() || 'Produce was received in excellent condition.',
+          images: photos,
+        });
+
+        Alert.alert(
+          'Review Submitted! ⭐',
+          'Thank you for rating your farm produce experience. Your feedback builds Sri Lanka\'s direct agricultural trust network.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onSubmitSuccess) onSubmitSuccess();
+                else onBack();
+              },
+            },
+          ]
+        );
+      }
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not submit review.');
+      Alert.alert('Error', err?.message || 'Could not save review.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDelete = () => {
+    if (!existingReview) return;
+    Alert.alert(
+      'Delete Rating? 🗑️',
+      'Are you sure you want to delete your rating? This will remove your review completely.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await RatingService.deleteReview(existingReview.id);
+              Alert.alert('Deleted', 'Your review has been deleted.');
+              if (onSubmitSuccess) onSubmitSuccess();
+              else onBack();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete review.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const renderStars = (rating: number, onSelect: (r: number) => void, size = 26) => (
@@ -144,6 +246,24 @@ export function RateExperienceScreen({
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Existing review notice if already rated */}
+        {existingReview && (
+          <View style={styles.existingNotice}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.existingNoticeTitle}>✏️ Editing Your Existing Review</Text>
+              <Text style={styles.existingNoticeSub}>
+                You rated this farmer before. Update your criteria scores or delete this rating.
+              </Text>
+            </View>
+            <Pressable
+              style={styles.deleteQuickBtn}
+              onPress={handleDelete}
+              disabled={deleting}>
+              <Text style={styles.deleteQuickBtnText}>🗑️ Delete</Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Farmer Card */}
         <View style={styles.farmerCard}>
           <Image source={{ uri: farmerAvatar }} style={styles.farmerAvatar} contentFit="cover" />
@@ -251,15 +371,33 @@ export function RateExperienceScreen({
           </View>
         </View>
 
-        {/* Submit Review */}
+        {/* Submit / Update Button */}
         <Pressable
           style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
           disabled={submitting}
           onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>
-            {submitting ? 'Submitting...' : 'Submit Review'}
+            {submitting
+              ? existingReview
+                ? 'Updating...'
+                : 'Submitting...'
+              : existingReview
+              ? 'Update Rating ⭐'
+              : 'Submit Review'}
           </Text>
         </Pressable>
+
+        {/* Delete Button (only if editing an existing rating) */}
+        {existingReview && (
+          <Pressable
+            style={[styles.deleteBtn, deleting && { opacity: 0.7 }]}
+            disabled={deleting}
+            onPress={handleDelete}>
+            <Text style={styles.deleteBtnText}>
+              {deleting ? 'Deleting...' : '🗑️ Delete This Rating'}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -475,6 +613,53 @@ const styles = StyleSheet.create({
   submitBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '800',
+  },
+  existingNotice: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  existingNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+  },
+  existingNoticeSub: {
+    fontSize: 11,
+    color: '#3B82F6',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  deleteQuickBtn: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  deleteQuickBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  deleteBtn: {
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  deleteBtnText: {
+    color: '#E11D48',
+    fontSize: 14,
     fontWeight: '800',
   },
 });

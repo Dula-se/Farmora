@@ -302,8 +302,10 @@ export function ProductDetailScreen({
             )}
           </View>
 
-          {/* Farmer Card */}
-          <View style={styles.farmerCard}>
+          {/* Farmer Card (Tap to view farmer profile & ratings) */}
+          <Pressable
+            style={({ pressed }) => [styles.farmerCard, pressed && { opacity: 0.95 }]}
+            onPress={() => onOpenReviews?.(product)}>
             <View style={styles.farmerAvatarCircle}>
               {product.farmerAvatar ? (
                 <Image
@@ -328,19 +330,22 @@ export function ProductDetailScreen({
               <Text style={styles.farmerLocation}>
                 {product.locationCity}, {product.locationDistrict}
               </Text>
-              <Pressable onPress={() => onOpenFarmMap?.(product)}>
-                <Text style={styles.farmerMapLink}>📍 18.4 km away • View on Map ›</Text>
-              </Pressable>
+              <Text style={{ fontSize: 11, color: '#166534', fontWeight: '700', marginTop: 2 }}>
+                ⭐ 4.9 • Tap to view farmer reviews ›
+              </Text>
             </View>
 
             {onChatFarmer && (
               <Pressable
                 style={styles.chatFarmerBtn}
-                onPress={() => onChatFarmer(String(product.farmerId))}>
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onChatFarmer(String(product.farmerId));
+                }}>
                 <Text style={styles.chatFarmerBtnText}>Chat</Text>
               </Pressable>
             )}
-          </View>
+          </Pressable>
 
           {/* Bulk Tier Discounts */}
           <View style={styles.sectionBlock}>

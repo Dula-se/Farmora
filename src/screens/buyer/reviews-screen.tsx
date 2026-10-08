@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -11,8 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { ApiProduceItem } from '@/services/api';
-import { ChatService, ReviewItem } from '@/services/chat-service';
+import { ApiProduceItem, getStoredUser, ApiUser } from '@/services/api';
+import { RatingService, RatingReview } from '@/services/rating-service';
 
 interface ReviewsScreenProps {
   product: ApiProduceItem;
@@ -20,69 +21,30 @@ interface ReviewsScreenProps {
   onWriteReview?: () => void;
 }
 
-const DEMO_REVIEWS = [
-  {
-    id: 'r1',
-    author: 'Chinthaka Perera',
-    date: '2 days ago',
-    rating: 5,
-    title: 'Extremely fresh and well packaged!',
-    comment:
-      'Harvest was crisp and sweet. Arrived washed and sorted in ventilated wooden crates. Zero bruising. Perfect for our restaurant kitchen in Colombo.',
-    helpful: 14,
-    images: [] as string[],
-  },
-  {
-    id: 'r2',
-    author: 'Dilshan Wickramasinghe',
-    date: '5 days ago',
-    rating: 5,
-    title: 'Direct farm gate pricing saved us 20%',
-    comment:
-      'We usually buy from the Pettah market where prices fluctuate wildly. Getting 200kg straight from Welimada plots at guaranteed rates is a game changer.',
-    helpful: 9,
-    images: [] as string[],
-  },
-  {
-    id: 'r3',
-    author: 'Manjula Senaratne',
-    date: '1 week ago',
-    rating: 4,
-    title: 'Very good quality, fast dispatch',
-    comment:
-      'Produce was top tier. Delivery took around 4 hours from highland dispatch to Kandy delivery. Will order on a weekly schedule.',
-    helpful: 5,
-    images: [] as string[],
-  },
-];
-
-const RATING_BARS = [
-  { stars: 5, percent: 78 },
-  { stars: 4, percent: 14 },
-  { stars: 3, percent: 5 },
-  { stars: 2, percent: 2 },
-  { stars: 1, percent: 1 },
-];
-
 export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenProps) {
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'photos' | '5star'>('all');
-  const [submittedReviews, setSubmittedReviews] = useState<ReviewItem[]>([]);
-  const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({
-    r1: 14,
-    r2: 9,
-    r3: 5,
-  });
+  const [reviews, setReviews] = useState<RatingReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({});
+
+  const targetId = String(product.farmerId || product.id || 'farmer-kusuma');
 
   useEffect(() => {
-    loadDynamicReviews();
-  }, []);
+    loadAllReviews();
+  }, [targetId]);
 
-  const loadDynamicReviews = async () => {
+  const loadAllReviews = async () => {
+    setLoading(true);
     try {
-      const revs = await ChatService.getReviews();
-      setSubmittedReviews(revs);
+      const u = await getStoredUser();
+      setCurrentUser(u);
+      const data = await RatingService.fetchReviewsForTarget(targetId);
+      setReviews(data);
     } catch (e) {
-      console.log('Failed to load reviews:', e);
+      console.warn('Failed to load reviews:', e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -93,29 +55,52 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
     }));
   };
 
-  // Convert submitted reviews to display format
-  const dynamicFormatted = submittedReviews.map((r) => ({
-    id: r.id,
-    author: r.authorName,
-    date: r.date,
-    rating: r.overallRating,
-    title: r.tags.length > 0 ? r.tags.join(' • ') : 'Verified Harvest Feedback',
-    comment: r.comment,
-    helpful: r.helpfulCount,
-    images: r.images || [],
-  }));
+  const handleDeleteReview = (reviewId: string) => {
+    Alert.alert(
+      'Delete Rating? 🗑️',
+      'Are you sure you want to delete your review? This will remove your feedback and update the rating score.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await RatingService.deleteReview(reviewId);
+              Alert.alert('Deleted', 'Your review has been deleted.');
+              loadAllReviews();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete review.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
-  const allCombined = [...dynamicFormatted, ...DEMO_REVIEWS];
+  const stats = RatingService.computeStats(reviews);
+  const averageRating = reviews.length > 0 ? stats.average : 4.8;
+  const totalCount = reviews.length > 0 ? stats.count : 0;
 
-  const filteredReviews = allCombined.filter((rev) => {
+  // Calculate rating bar percentages
+  const ratingBars = [5, 4, 3, 2, 1].map((stars) => {
+    const starCount = reviews.filter((r) => r.overallRating === stars).length;
+    const percent = totalCount > 0 ? Math.round((starCount / totalCount) * 100) : stars === 5 ? 78 : stars === 4 ? 14 : 4;
+    return { stars, percent };
+  });
+
+  const filteredReviews = reviews.filter((rev) => {
     if (activeFilter === 'photos') {
       return rev.images && rev.images.length > 0;
     }
     if (activeFilter === '5star') {
-      return rev.rating >= 5;
+      return rev.overallRating >= 5;
     }
     return true;
   });
+
+  const myId = currentUser?.id || currentUser?._id;
+  const myReview = reviews.find((r) => (myId && r.authorId === myId) || (currentUser?.fullName && r.authorName === currentUser.fullName));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -141,17 +126,23 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Write Review CTA Card */}
+        {/* Write / Edit Review CTA Card */}
         {onWriteReview && (
           <Pressable
-            style={styles.rateCtaCard}
+            style={[styles.rateCtaCard, myReview && { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }]}
             onPress={onWriteReview}>
-            <View>
-              <Text style={styles.rateCtaTitle}>Bought from this farmer?</Text>
-              <Text style={styles.rateCtaSub}>Rate quality, sorting, and dispatch</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rateCtaTitle}>
+                {myReview ? 'You Rated This Farmer ⭐' : 'Bought from this farmer?'}
+              </Text>
+              <Text style={styles.rateCtaSub}>
+                {myReview ? 'Tap to edit criteria scores or delete your review' : 'Rate quality, sorting, and dispatch'}
+              </Text>
             </View>
-            <View style={styles.rateCtaBtn}>
-              <Text style={styles.rateCtaBtnText}>Write Review ⭐</Text>
+            <View style={[styles.rateCtaBtn, myReview && { backgroundColor: '#15803D' }]}>
+              <Text style={styles.rateCtaBtnText}>
+                {myReview ? 'Edit Review ✏️' : 'Write Review ⭐'}
+              </Text>
             </View>
           </Pressable>
         )}
@@ -159,15 +150,15 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
         {/* Big Rating Summary Card */}
         <View style={styles.ratingOverviewCard}>
           <View style={styles.leftScore}>
-            <Text style={styles.bigScore}>4.8</Text>
+            <Text style={styles.bigScore}>{averageRating.toFixed(1)}</Text>
             <View style={styles.starsRow}>
-              <Text style={styles.starsText}>★★★★★</Text>
+              <Text style={styles.starsText}>{'★'.repeat(Math.round(averageRating))}</Text>
             </View>
-            <Text style={styles.reviewTotal}>{allCombined.length} verified ratings</Text>
+            <Text style={styles.reviewTotal}>{totalCount} verified ratings</Text>
           </View>
 
           <View style={styles.barsContainer}>
-            {RATING_BARS.map((b) => (
+            {ratingBars.map((b) => (
               <View key={b.stars} style={styles.barRow}>
                 <Text style={styles.barLabel}>{b.stars}★</Text>
                 <View style={styles.barTrack}>
@@ -208,14 +199,14 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
             style={[styles.filterChip, activeFilter === 'all' && styles.filterChipActive]}
             onPress={() => setActiveFilter('all')}>
             <Text style={[styles.filterChipText, activeFilter === 'all' && styles.filterChipTextActive]}>
-              All ({allCombined.length})
+              All ({reviews.length})
             </Text>
           </Pressable>
           <Pressable
             style={[styles.filterChip, activeFilter === 'photos' && styles.filterChipActive]}
             onPress={() => setActiveFilter('photos')}>
             <Text style={[styles.filterChipText, activeFilter === 'photos' && styles.filterChipTextActive]}>
-              With Photos ({allCombined.filter((r) => r.images && r.images.length > 0).length})
+              With Photos ({reviews.filter((r) => r.images && r.images.length > 0).length})
             </Text>
           </Pressable>
           <Pressable
@@ -229,55 +220,111 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
 
         {/* Reviews List */}
         <View style={styles.reviewsList}>
-          {filteredReviews.map((rev) => (
-            <View key={rev.id} style={styles.reviewCard}>
-              <View style={styles.reviewHeader}>
-                <View style={styles.reviewerAvatar}>
-                  <Text style={styles.avatarEmoji}>{rev.author.charAt(0)}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.authorRow}>
-                    <Text style={styles.authorName}>{rev.author}</Text>
-                    <View style={styles.buyerVerifiedBadge}>
-                      <Text style={styles.buyerVerifiedText}>✓ Verified Buyer</Text>
+          {filteredReviews.length === 0 ? (
+            <View style={{ padding: 30, alignItems: 'center' }}>
+              <Text style={{ fontSize: 32 }}>🌿</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#64748B', marginTop: 8 }}>
+                No reviews yet in this filter
+              </Text>
+            </View>
+          ) : (
+            filteredReviews.map((rev) => {
+              const isMyReview =
+                (myId && rev.authorId === myId) ||
+                (currentUser?.fullName && rev.authorName === currentUser.fullName) ||
+                rev.id === myReview?.id;
+
+              const displayDate = rev.createdAt
+                ? new Date(rev.createdAt).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : 'Recent';
+
+              return (
+                <View
+                  key={rev.id}
+                  style={[
+                    styles.reviewCard,
+                    isMyReview && { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' },
+                  ]}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewerAvatar}>
+                      <Text style={styles.avatarEmoji}>
+                        {rev.authorName ? rev.authorName.charAt(0) : '👤'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.authorRow}>
+                        <Text style={styles.authorName}>{rev.authorName}</Text>
+                        {isMyReview ? (
+                          <View style={styles.myReviewBadge}>
+                            <Text style={styles.myReviewBadgeText}>👑 Your Review</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.buyerVerifiedBadge}>
+                            <Text style={styles.buyerVerifiedText}>✓ Verified Buyer</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.reviewDate}>{displayDate}</Text>
+                    </View>
+
+                    <View style={styles.starsPill}>
+                      <Text style={styles.starsPillText}>
+                        {'★'.repeat(rev.overallRating || 5)}
+                      </Text>
                     </View>
                   </View>
-                  <Text style={styles.reviewDate}>{rev.date}</Text>
+
+                  {rev.tags && rev.tags.length > 0 && (
+                    <Text style={styles.reviewTitle}>{rev.tags.join(' • ')}</Text>
+                  )}
+                  <Text style={styles.reviewComment}>{rev.comment}</Text>
+
+                  {/* Photos if attached (Base64) */}
+                  {rev.images && rev.images.length > 0 && (
+                    <View style={styles.imagesRow}>
+                      {rev.images.map((imgUri, idx) => (
+                        <Image
+                          key={idx}
+                          source={{ uri: imgUri }}
+                          style={styles.reviewAttachedImg}
+                          contentFit="cover"
+                        />
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={styles.reviewFooter}>
+                    <Pressable
+                      style={styles.helpfulBtn}
+                      onPress={() => toggleHelpful(rev.id)}>
+                      <Text style={styles.helpfulText}>
+                        👍 Helpful ({helpfulCounts[rev.id] || rev.helpfulCount || 0})
+                      </Text>
+                    </Pressable>
+
+                    {/* Action buttons if this review belongs to the user */}
+                    {isMyReview && (
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          style={styles.inlineEditBtn}
+                          onPress={onWriteReview}>
+                          <Text style={styles.inlineEditBtnText}>✏️ Edit</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.inlineDeleteBtn}
+                          onPress={() => handleDeleteReview(rev.id)}>
+                          <Text style={styles.inlineDeleteBtnText}>🗑️ Delete</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
                 </View>
-
-                <View style={styles.starsPill}>
-                  <Text style={styles.starsPillText}>{'★'.repeat(rev.rating)}</Text>
-                </View>
-              </View>
-
-              <Text style={styles.reviewTitle}>{rev.title}</Text>
-              <Text style={styles.reviewComment}>{rev.comment}</Text>
-
-              {/* Photos if attached (Base64) */}
-              {rev.images && rev.images.length > 0 && (
-                <View style={styles.imagesRow}>
-                  {rev.images.map((imgUri, idx) => (
-                    <Image
-                      key={idx}
-                      source={{ uri: imgUri }}
-                      style={styles.reviewAttachedImg}
-                      contentFit="cover"
-                    />
-                  ))}
-                </View>
-              )}
-
-              <View style={styles.reviewFooter}>
-                <Pressable
-                  style={styles.helpfulBtn}
-                  onPress={() => toggleHelpful(rev.id)}>
-                  <Text style={styles.helpfulText}>
-                    👍 Helpful ({helpfulCounts[rev.id] || rev.helpful || 0})
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -562,8 +609,9 @@ const styles = StyleSheet.create({
   },
   reviewFooter: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
-    marginTop: 4,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
   },
   helpfulBtn: {
     backgroundColor: '#F8FAFC',
@@ -577,5 +625,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     fontWeight: '600',
+  },
+  myReviewBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  myReviewBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  inlineEditBtn: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  inlineEditBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  inlineDeleteBtn: {
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  inlineDeleteBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E11D48',
   },
 });
