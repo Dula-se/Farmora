@@ -73,6 +73,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     alreadyHaveAccount: 'Already have an account?',
     backToLogin: 'Back to Login',
     logout: 'Log Out',
+    deleteProfile: 'Delete Profile & Account',
+    deleteProfileConfirm: 'Permanently Delete Profile?',
+    deleteProfileWarning: 'Are you sure you want to permanently delete your Farmora account and all registered data? This action cannot be reversed.',
 
     // Navigation & Tabs
     home: 'Home',
@@ -191,6 +194,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     alreadyHaveAccount: 'දැනටමත් ගිණුමක් තිබේද?',
     backToLogin: 'ආපසු ඇතුල් වීමට',
     logout: 'පිටවන්න',
+    deleteProfile: 'පැතිකඩ සහ ගිණුම මකන්න',
+    deleteProfileConfirm: 'පැතිකඩ ස්ථිරවම මකන්නද?',
+    deleteProfileWarning: 'ඔබේ ෆාමෝරා ගිණුම සහ සියලු දත්ත ස්ථිරවම මැකීමට ඔබට විශ්වාසද? මෙය නැවත ලබාගත නොහැක.',
 
     // Navigation & Tabs
     home: 'මුල් පිටුව',
@@ -309,6 +315,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     alreadyHaveAccount: 'ஏற்கனவே கணக்கு உள்ளதா?',
     backToLogin: 'உள்நுழைவுக்குத் திரும்பு',
     logout: 'வெளியேறுக',
+    deleteProfile: 'சுயவிவரம் மற்றும் கணக்கை நீக்கு',
+    deleteProfileConfirm: 'சுயவிவரத்தை நிரந்தரமாக நீக்கவா?',
+    deleteProfileWarning: 'உங்கள் ஃபார்மோரா கணக்கு மற்றும் எல்லா தரவுகளையும் நிரந்தரமாக நீக்க விரும்புகிறீர்களா? இதை மாற்றியமைக்க முடியாது.',
 
     // Navigation & Tabs
     home: 'முகப்பு',

@@ -68,18 +68,22 @@ export const EditProductScreen: React.FC<EditProductScreenProps> = ({
       return;
     }
 
+    const cleanCategory = (category || 'vegetables').toLowerCase().trim();
+    const cleanDesc = description.trim() || `${title.trim()} - High quality fresh farm produce.`;
+    const safeImages = images && images.length > 0 ? images : ['https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400'];
+
     setIsSubmitting(true);
     try {
-      const prodId = product._id || product.id;
+      const prodId = product._id || product.id || 'produce_item';
       const updated = await updateProduceListing(prodId, {
         title: title.trim(),
-        category,
-        description: description.trim(),
+        category: cleanCategory,
+        description: cleanDesc,
         availableQuantity: qty,
         pricePerUnit: price,
         minimumOrderQuantity: parseFloat(minOrderQty) || 1,
-        harvestDate,
-        images,
+        harvestDate: harvestDate || new Date().toISOString().split('T')[0],
+        images: safeImages,
       });
 
       Alert.alert('Success', 'Listing updated successfully!');

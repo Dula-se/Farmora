@@ -8,6 +8,7 @@ import { OtpModel } from '../models/Otp.js';
 import mongoose from 'mongoose';
 import { config } from '../config/env.js';
 import { NotificationController } from './notification.controller.js';
+import { UserController } from './user.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import type { AccountType } from '../types/index.js';
 
@@ -453,6 +454,13 @@ export class AuthController {
       console.error('Update profile error:', err);
       return sendError(res, 'Failed to update profile.', 500);
     }
+  }
+
+  /**
+   * Delete authenticated user profile & data
+   */
+  static async deleteProfile(req: Request, res: Response) {
+    return UserController.deleteProfile(req, res);
   }
 
   /**

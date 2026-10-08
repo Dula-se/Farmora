@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { updateProfileApi, clearAuthSession } from '@/services/api';
+import { updateProfileApi, clearAuthSession, deleteProfileApi } from '@/services/api';
 
 interface SecurityScreenProps {
   onBack?: () => void;
@@ -82,16 +82,21 @@ export function SecurityScreen({ onBack, onLogout }: SecurityScreenProps) {
 
   const handleDeleteAccount = () => {
     Alert.alert(
-      'Delete Account Warning',
-      'Are you sure you want to permanently delete your Farmora account and all registered data? This action cannot be reversed.',
+      'Permanently Delete Account?',
+      'Are you sure you want to permanently delete your Farmora account, orders, listings, and all data? This action cannot be reversed.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Permanently Delete',
           style: 'destructive',
           onPress: async () => {
-            await clearAuthSession();
-            onLogout?.();
+            try {
+              await deleteProfileApi();
+              Alert.alert('Account Deleted', 'Your profile and associated data have been permanently removed.');
+              onLogout?.();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete account. Please try again.');
+            }
           },
         },
       ]

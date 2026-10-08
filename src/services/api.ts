@@ -285,6 +285,24 @@ export async function updateProfileApi(updates: Partial<ApiUser>): Promise<ApiUs
   return result.data;
 }
 
+export async function deleteProfileApi(): Promise<boolean> {
+  try {
+    await apiFetch('/users/profile', { method: 'DELETE' });
+    await clearAuthSession();
+    return true;
+  } catch (err) {
+    try {
+      await apiFetch('/auth/profile', { method: 'DELETE' });
+      await clearAuthSession();
+      return true;
+    } catch (fallbackErr) {
+      console.error('[API] deleteProfileApi error:', fallbackErr);
+      throw fallbackErr;
+    }
+  }
+}
+
+
 export async function updateFarmerOnboardingApi(data: any): Promise<ApiUser> {
   const result = await apiFetch<ApiUser>('/auth/farmer-onboarding', {
     method: 'PUT',
@@ -385,12 +403,21 @@ export async function updateProduceListing(
   id: string,
   data: Partial<ApiProduceItem>
 ): Promise<ApiProduceItem> {
-  const result = await apiFetch<ApiProduceItem>(`/produce/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-  return result.data;
+  try {
+    const result = await apiFetch<ApiProduceItem>(`/produce/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    return result.data;
+  } catch (err) {
+    const result = await apiFetch<ApiProduceItem>(`/produce/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    return result.data;
+  }
 }
+
 
 export async function deleteProduceListing(id: string): Promise<void> {
   await apiFetch(`/produce/${id}`, {

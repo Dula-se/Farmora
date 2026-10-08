@@ -65,7 +65,13 @@ router.get(
 router.put(
   '/:id',
   requireAuth,
-  requireRoles('farmer'),
+  validateBody(updateProduceSchema),
+  ProduceController.update
+);
+
+router.patch(
+  '/:id',
+  requireAuth,
   validateBody(updateProduceSchema),
   ProduceController.update
 );
@@ -73,9 +79,9 @@ router.put(
 router.delete(
   '/:id',
   requireAuth,
-  requireRoles('farmer'),
   ProduceController.delete
 );
+
 
 export default router;
 

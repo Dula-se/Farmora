@@ -21,6 +21,7 @@ import {
   fetchMe,
   updateProfileApi,
   clearAuthSession,
+  deleteProfileApi,
   fetchMyListings,
   ApiUser,
   ApiProduceItem,
@@ -175,6 +176,8 @@ export function FarmerProfileScreen({
     }
   };
 
+  const [isDeletingProfile, setIsDeletingProfile] = useState(false);
+
   const handleLogoutPress = () => {
     Alert.alert('Sign Out', 'Are you sure you want to log out of your farm account?', [
       { text: 'Cancel', style: 'cancel' },
@@ -187,6 +190,32 @@ export function FarmerProfileScreen({
         },
       },
     ]);
+  };
+
+  const handleDeleteProfilePress = () => {
+    Alert.alert(
+      'Permanently Delete Farm Profile & Account?',
+      'Are you sure you want to delete your profile? All your produce listings, harvests, and farm records will be permanently removed. This action cannot be reversed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Permanently Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeletingProfile(true);
+              await deleteProfileApi();
+              Alert.alert('Profile Deleted', 'Your farm account and all data have been permanently removed.');
+              onLogout();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete profile. Please try again.');
+            } finally {
+              setIsDeletingProfile(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading && !user) {
@@ -502,6 +531,23 @@ export function FarmerProfileScreen({
             <Path d="M21 12H9" />
           </Svg>
           <Text style={styles.logoutButtonText}>Sign Out of Farm Account</Text>
+        </Pressable>
+
+        {/* Delete Profile Button */}
+        <Pressable
+          style={[styles.deleteProfileButton, isDeletingProfile && { opacity: 0.6 }]}
+          disabled={isDeletingProfile}
+          onPress={handleDeleteProfilePress}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#B91C1C" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M3 6h18" />
+            <Path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+            <Path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <Path d="M10 11v6" />
+            <Path d="M14 11v6" />
+          </Svg>
+          <Text style={styles.deleteProfileButtonText}>
+            {isDeletingProfile ? 'Deleting Account...' : 'Delete Farm Profile & Account'}
+          </Text>
         </Pressable>
 
         <View style={{ height: 40 }} />
@@ -1001,6 +1047,23 @@ const styles = StyleSheet.create({
   },
   logoutButtonText: {
     color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  deleteProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    marginTop: 10,
+  },
+  deleteProfileButtonText: {
+    color: '#B91C1C',
     fontSize: 14,
     fontWeight: '700',
   },

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { clearAuthSession } from '@/services/api';
+import { clearAuthSession, deleteProfileApi } from '@/services/api';
 import { useLanguage } from '@/services/i18n';
 
 interface SettingsScreenProps {
@@ -19,6 +19,7 @@ interface SettingsScreenProps {
   onOpenEditProfile?: () => void;
   onOpenSecurity?: () => void;
   onLogout?: () => void;
+  onProfileDeleted?: () => void;
 }
 
 export function SettingsScreen({
@@ -26,8 +27,10 @@ export function SettingsScreen({
   onOpenEditProfile,
   onOpenSecurity,
   onLogout,
+  onProfileDeleted,
 }: SettingsScreenProps) {
   const { language, setLanguage, t } = useLanguage();
+  const [isDeleting, setIsDeleting] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [orderUpdates, setOrderUpdates] = useState(true);
 
@@ -59,6 +62,36 @@ export function SettingsScreen({
       { text: 'தமிழ் (Tamil)', onPress: () => setLanguage('ta') },
       { text: 'Cancel', style: 'cancel' },
     ]);
+  };
+
+  const handleDeleteProfile = () => {
+    Alert.alert(
+      t('deleteProfileConfirm'),
+      t('deleteProfileWarning'),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeleting(true);
+              await deleteProfileApi();
+              Alert.alert('Profile Deleted', 'Your account and data have been permanently removed.');
+              if (onProfileDeleted) {
+                onProfileDeleted();
+              } else {
+                onLogout?.();
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not delete profile. Please try again.');
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -148,7 +181,7 @@ export function SettingsScreen({
           </View>
         </View>
 
-        {/* Logout Button */}
+        {/* Action Buttons */}
         <Pressable
           style={({ pressed }) => [
             styles.logoutBtn,
@@ -156,6 +189,19 @@ export function SettingsScreen({
           ]}
           onPress={handleLogout}>
           <Text style={styles.logoutBtnText}>Logout from Device</Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.deleteProfileBtn,
+            pressed && styles.deleteProfileBtnPressed,
+            isDeleting && { opacity: 0.6 },
+          ]}
+          disabled={isDeleting}
+          onPress={handleDeleteProfile}>
+          <Text style={styles.deleteProfileBtnText}>
+            {isDeleting ? 'Deleting Account...' : `🗑️ ${t('deleteProfile')}`}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -277,4 +323,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#EF4444',
   },
+  deleteProfileBtn: {
+    height: 50,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#B91C1C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    backgroundColor: '#DC2626',
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  deleteProfileBtnPressed: {
+    backgroundColor: '#991B1B',
+  },
+  deleteProfileBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });
+

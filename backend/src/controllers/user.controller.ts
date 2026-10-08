@@ -1,6 +1,15 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { UserModel } from '../models/User.js';
+import { ProduceModel } from '../models/Produce.js';
+import { AuctionModel } from '../models/Auction.js';
+import { HarvestModel } from '../models/Harvest.js';
+import { OrderModel } from '../models/Order.js';
+import { WishlistModel } from '../models/Wishlist.js';
+import { NotificationModel } from '../models/Notification.js';
+import { OtpModel } from '../models/Otp.js';
+import { ConversationModel } from '../models/Conversation.js';
+import { MessageModel } from '../models/Message.js';
 import { StorageService } from '../services/storage.service.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
@@ -19,6 +28,33 @@ function sanitizeUser(user: any) {
   }
   const { passwordHash: _, ...safeUser } = user;
   return safeUser;
+}
+
+export async function deleteUserAccountAndData(userId: string): Promise<boolean> {
+  const user = await UserModel.findById(userId);
+  if (!user) {
+    return false;
+  }
+
+  const userPhone = user.mobileNumber;
+  const userEmail = user.email;
+  const identifiers = [userPhone, userEmail].filter(Boolean) as string[];
+
+  await Promise.allSettled([
+    ProduceModel.deleteMany({ farmerId: userId }),
+    AuctionModel.deleteMany({ sellerId: userId }),
+    AuctionModel.updateMany({ 'bids.bidderId': userId }, { $pull: { bids: { bidderId: userId } } }),
+    HarvestModel.deleteMany({ farmerId: userId }),
+    OrderModel.deleteMany({ $or: [{ buyerId: userId }, { farmerId: userId }] }),
+    WishlistModel.deleteMany({ userId }),
+    NotificationModel.deleteMany({ userId }),
+    identifiers.length ? OtpModel.deleteMany({ identifier: { $in: identifiers } }) : Promise.resolve(),
+    MessageModel.deleteMany({ senderId: userId }),
+    ConversationModel.deleteMany({ participants: userId }),
+  ]);
+
+  await UserModel.findByIdAndDelete(userId);
+  return true;
 }
 
 export class UserController {
@@ -96,4 +132,54 @@ export class UserController {
       return sendError(res, 'Failed to upload profile picture', 500);
     }
   }
+
+  /**
+   * Delete authenticated user's profile and account
+   */
+  static async deleteProfile(req: Request, res: Response) {
+    try {
+      const user = req.user!;
+      const userId = (user as any)._id?.toString() || user.id?.toString();
+
+      if (!userId) {
+        return sendError(res, 'Unauthorized', 401);
+      }
+
+      const deleted = await deleteUserAccountAndData(userId);
+      if (!deleted) {
+        return sendError(res, 'User not found', 404);
+      }
+
+      return sendSuccess(res, null, 'User profile and all associated data permanently deleted.');
+    } catch (err) {
+      console.error('Delete user profile error:', err);
+      return sendError(res, 'Failed to delete user profile', 500);
+    }
+  }
+
+  /**
+   * Delete user by ID (authenticated user can delete self)
+   */
+  static async deleteById(req: Request, res: Response) {
+    try {
+      const user = req.user!;
+      const authUserId = (user as any)._id?.toString() || user.id?.toString();
+      const targetId = req.params.id as string;
+
+      if (!authUserId || authUserId !== targetId) {
+        return sendError(res, 'Forbidden: You can only delete your own profile', 403);
+      }
+
+      const deleted = await deleteUserAccountAndData(targetId);
+      if (!deleted) {
+        return sendError(res, 'User not found', 404);
+      }
+
+      return sendSuccess(res, null, 'User profile permanently deleted.');
+    } catch (err) {
+      console.error('Delete user by id error:', err);
+      return sendError(res, 'Failed to delete user', 500);
+    }
+  }
 }
+

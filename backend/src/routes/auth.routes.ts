@@ -28,6 +28,7 @@ router.post('/reset-password', validateBody(resetPasswordSchema), AuthController
 // Current session & Profile
 router.get('/me', requireAuth, AuthController.getMe);
 router.put('/profile', requireAuth, AuthController.updateProfile);
+router.delete('/profile', requireAuth, AuthController.deleteProfile);
 router.put('/farmer-onboarding', requireAuth, AuthController.updateFarmerOnboarding);
 router.get('/farmer-profile/:id', AuthController.getPublicFarmerProfile);
 

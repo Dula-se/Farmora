@@ -24,4 +24,9 @@ router.post(
   UserController.uploadAvatar
 );
 
+// Delete profile and all associated data
+router.delete('/profile', requireAuth, UserController.deleteProfile);
+router.delete('/:id', requireAuth, UserController.deleteById);
+
 export default router;
+
