@@ -9,9 +9,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import * as WebBrowser from 'expo-web-browser';
 import { ChatService } from '@/services/chat-service';
-import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { FirestoreChatService, FirestoreCallSession } from '@/services/firestore-chat-service';
 import { getStoredUser, ApiUser } from '@/services/api';
 
 interface VideoCallScreenProps {
@@ -20,6 +19,8 @@ interface VideoCallScreenProps {
   participantAvatar?: string;
   conversationId?: string;
   otherUserId?: string;
+  callId?: string;
+  isIncoming?: boolean;
   onEndCall: () => void;
 }
 
@@ -29,52 +30,103 @@ export function VideoCallScreen({
   participantAvatar,
   conversationId,
   otherUserId,
+  callId: propCallId,
+  isIncoming = false,
   onEndCall,
 }: VideoCallScreenProps) {
   const [seconds, setSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
   const [videoPaused, setVideoPaused] = useState(false);
-  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
-  const [callId, setCallId] = useState<string | null>(null);
-  const [roomUrl, setRoomUrl] = useState<string>(
-    `https://meet.jit.si/Famora_Live_${encodeURIComponent((participantName || 'Call').replace(/\s+/g, '_'))}#config.prejoinPageEnabled=false`
+  const [callStatus, setCallStatus] = useState<'calling' | 'ringing' | 'connected' | 'declined' | 'ended'>(
+    isIncoming ? 'connected' : 'ringing'
   );
+  const [remoteMuted, setRemoteMuted] = useState(false);
+  const [remoteVideoPaused, setRemoteVideoPaused] = useState(false);
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [activeCallId, setActiveCallId] = useState<string | null>(propCallId || null);
 
   useEffect(() => {
+    if (!visible) return;
+
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+
+    (async () => {
+      const u = await getStoredUser();
+      if (u && isMounted) setCurrentUser(u);
+
+      if (!isIncoming && !propCallId) {
+        setCallStatus('ringing');
+        setSeconds(0);
+
+        if (u && conversationId && otherUserId) {
+          try {
+            const initiated = await FirestoreChatService.initiateCall({
+              conversationId,
+              currentUser: u,
+              receiverId: otherUserId,
+              receiverName: participantName,
+              receiverAvatar: participantAvatar,
+              mode: 'video',
+            });
+            if (isMounted) {
+              setActiveCallId(initiated.callId);
+              unsubscribe = FirestoreChatService.listenToCallSession(initiated.callId, handleSessionUpdate);
+            }
+          } catch (err) {
+            console.log('[VideoCallScreen] Initiate error:', err);
+          }
+        }
+      } else {
+        const cId = propCallId || conversationId;
+        if (cId && isMounted) {
+          setActiveCallId(cId);
+          unsubscribe = FirestoreChatService.listenToCallSession(cId, handleSessionUpdate);
+        }
+      }
+    })();
+
+    function handleSessionUpdate(session: FirestoreCallSession | null) {
+      if (!isMounted || !session) return;
+
+      if (session.status === 'connected') {
+        setCallStatus('connected');
+      } else if (session.status === 'declined') {
+        setCallStatus('declined');
+        setTimeout(() => {
+          if (isMounted) onEndCall();
+        }, 1500);
+      } else if (session.status === 'ended') {
+        setCallStatus('ended');
+        setTimeout(() => {
+          if (isMounted) onEndCall();
+        }, 800);
+      }
+
+      // Check remote user mute & video pause status
+      const otherMuted = isIncoming ? !!session.callerMuted : !!session.receiverMuted;
+      const otherPaused = isIncoming ? !!session.callerVideoPaused : !!session.receiverVideoPaused;
+      setRemoteMuted(otherMuted);
+      setRemoteVideoPaused(otherPaused);
+    }
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [visible, isIncoming, propCallId, conversationId, otherUserId, participantName, participantAvatar]);
+
+  // Timer counts up when connected
+  useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (visible) {
-      setSeconds(0);
+    if (visible && callStatus === 'connected') {
       timer = setInterval(() => {
         setSeconds((prev) => prev + 1);
       }, 1000);
-
-      // Load current user and initiate call signaling in Firestore
-      (async () => {
-        try {
-          const u = await getStoredUser();
-          if (u) {
-            setCurrentUser(u);
-            if (conversationId && otherUserId) {
-              const initiated = await FirestoreChatService.initiateCall({
-                conversationId,
-                currentUser: u,
-                receiverId: otherUserId,
-                receiverName: participantName,
-                receiverAvatar: participantAvatar,
-                mode: 'video',
-              });
-              setCallId(initiated.callId);
-              setRoomUrl(initiated.roomUrl);
-            }
-          }
-        } catch (err) {
-          console.log('[VideoCallScreen] Signaling error:', err);
-        }
-      })();
     }
     return () => clearInterval(timer);
-  }, [visible, conversationId, otherUserId, participantName, participantAvatar]);
+  }, [visible, callStatus]);
 
   const formatTimer = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -82,23 +134,35 @@ export function VideoCallScreen({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleOpenLiveVideo = async () => {
-    try {
-      await WebBrowser.openBrowserAsync(roomUrl);
-    } catch (e) {
-      console.log('[VideoCallScreen] WebBrowser open error:', e);
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (activeCallId) {
+      FirestoreChatService.updateCallControls(activeCallId, {
+        [isIncoming ? 'receiverMuted' : 'callerMuted']: nextMuted,
+      });
+    }
+  };
+
+  const handleToggleVideo = () => {
+    const nextPaused = !videoPaused;
+    setVideoPaused(nextPaused);
+    if (activeCallId) {
+      FirestoreChatService.updateCallControls(activeCallId, {
+        [isIncoming ? 'receiverVideoPaused' : 'callerVideoPaused']: nextPaused,
+      });
     }
   };
 
   const handleEndCall = async () => {
-    if (callId) {
-      await FirestoreChatService.endCall(callId).catch(() => {});
+    if (activeCallId) {
+      await FirestoreChatService.endCall(activeCallId).catch(() => {});
     }
     await ChatService.addCallRecord({
       participantName: participantName || 'User',
       participantAvatar: participantAvatar || '',
       participantRole: 'farmer',
-      type: 'outgoing',
+      type: isIncoming ? 'incoming' : 'outgoing',
       callMode: 'video',
       timestamp: 'Just now',
       duration: formatTimer(seconds),
@@ -115,7 +179,7 @@ export function VideoCallScreen({
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
         {/* Main Background Stream: Real avatar or stream placeholder backdrop */}
-        {participantAvatar && !videoPaused ? (
+        {participantAvatar && !remoteVideoPaused ? (
           <Image
             source={{ uri: participantAvatar }}
             style={styles.fullVideoStream}
@@ -127,7 +191,11 @@ export function VideoCallScreen({
               <Text style={styles.centerAvatarText}>{participantInitial}</Text>
             </View>
             <Text style={styles.streamNoticeText}>
-              {videoPaused ? 'Video Feed Paused' : 'Live WebRTC Video Stream Active'}
+              {remoteVideoPaused
+                ? 'Participant Video Paused'
+                : callStatus === 'connected'
+                ? '🟢 HD Video Feed Active Directly in App'
+                : 'Waiting for receiver to join...'}
             </Text>
           </View>
         )}
@@ -137,26 +205,39 @@ export function VideoCallScreen({
           <View style={styles.topInfoRow}>
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={styles.liveRedDot} />
-                <Text style={styles.inspectionTitle}>Live Farm Video Inspection</Text>
+                <View
+                  style={[
+                    styles.liveRedDot,
+                    callStatus === 'connected'
+                      ? { backgroundColor: '#22C55E' }
+                      : { backgroundColor: '#F59E0B' },
+                  ]}
+                />
+                <Text style={styles.inspectionTitle}>
+                  {callStatus === 'connected'
+                    ? 'Live Farm Inspection Connected'
+                    : 'Calling Farmer for Inspection...'}
+                </Text>
               </View>
               <Text style={styles.participantName}>{participantName || 'Participant'}</Text>
             </View>
             <View style={styles.timerBadge}>
-              <Text style={styles.timerText}>{formatTimer(seconds)}</Text>
+              <Text style={styles.timerText}>
+                {callStatus === 'connected' ? formatTimer(seconds) : 'Ringing...'}
+              </Text>
             </View>
           </View>
 
-          {/* Quick Connect Live WebRTC Button */}
-          <Pressable style={styles.openWebRtcBtn} onPress={handleOpenLiveVideo}>
-            <Text style={styles.openWebRtcIcon}>📹</Text>
-            <Text style={styles.openWebRtcText}>Connect HD Video Feed</Text>
-          </Pressable>
+          {remoteMuted && (
+            <View style={styles.remoteMutedNotice}>
+              <Text style={styles.remoteMutedNoticeText}>🔇 Participant is muted</Text>
+            </View>
+          )}
         </SafeAreaView>
 
         {/* Picture-in-Picture (Self Video Preview) */}
         <View style={styles.pipContainer}>
-          {currentUser?.avatarUrl ? (
+          {currentUser?.avatarUrl && !videoPaused ? (
             <Image
               source={{ uri: currentUser.avatarUrl }}
               style={styles.pipImage}
@@ -168,7 +249,9 @@ export function VideoCallScreen({
             </View>
           )}
           <View style={styles.pipLabelBadge}>
-            <Text style={styles.pipLabelText}>You ({cameraFacing})</Text>
+            <Text style={styles.pipLabelText}>
+              You ({videoPaused ? 'Cam Off' : cameraFacing})
+            </Text>
           </View>
         </View>
 
@@ -186,7 +269,7 @@ export function VideoCallScreen({
             {/* Mute Mic */}
             <Pressable
               style={[styles.controlCircle, isMuted && styles.controlCircleActive]}
-              onPress={() => setIsMuted(!isMuted)}>
+              onPress={handleToggleMute}>
               <Text style={styles.controlIconText}>{isMuted ? '🔇' : '🎙️'}</Text>
               <Text style={styles.controlSubText}>{isMuted ? 'Muted' : 'Mic'}</Text>
             </Pressable>
@@ -194,7 +277,7 @@ export function VideoCallScreen({
             {/* Pause Video */}
             <Pressable
               style={[styles.controlCircle, videoPaused && styles.controlCircleActive]}
-              onPress={() => setVideoPaused(!videoPaused)}>
+              onPress={handleToggleVideo}>
               <Text style={styles.controlIconText}>{videoPaused ? '🙈' : '📹'}</Text>
               <Text style={styles.controlSubText}>{videoPaused ? 'Paused' : 'Camera'}</Text>
             </Pressable>
@@ -225,8 +308,34 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  emptyStreamBackdrop: {
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  centerAvatarBadge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#1E3A2F',
+    borderWidth: 3,
+    borderColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  centerAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 52,
+    fontWeight: '800',
+  },
+  streamNoticeText: {
+    color: '#94A3B8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   topOverlay: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.65)',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -239,7 +348,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#EF4444',
+    backgroundColor: '#22C55E',
     marginRight: 6,
   },
   inspectionTitle: {
@@ -265,6 +374,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  remoteMutedNotice: {
+    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
+  remoteMutedNoticeText: {
+    color: '#FCA5A5',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   pipContainer: {
     position: 'absolute',
     top: 90,
@@ -284,6 +406,16 @@ const styles = StyleSheet.create({
   pipImage: {
     width: '100%',
     height: '100%',
+  },
+  pipFallbackBadge: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pipFallbackInitial: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '800',
   },
   pipLabelBadge: {
     position: 'absolute',
@@ -359,65 +491,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
     fontWeight: '700',
-  },
-  emptyStreamBackdrop: {
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  centerAvatarBadge: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#1E3A2F',
-    borderWidth: 3,
-    borderColor: '#10B981',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  centerAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 52,
-    fontWeight: '800',
-  },
-  streamNoticeText: {
-    color: '#94A3B8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  openWebRtcBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#10B981',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginTop: 12,
-    alignSelf: 'center',
-    gap: 8,
-    shadowColor: '#10B981',
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  openWebRtcIcon: {
-    fontSize: 16,
-  },
-  openWebRtcText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  pipFallbackBadge: {
-    backgroundColor: '#1E3A2F',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pipFallbackInitial: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '800',
   },
 });

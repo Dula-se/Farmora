@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Alert,
   Platform,
@@ -32,6 +32,7 @@ import { MessagesListScreen } from '../communication/messages-list-screen';
 import { ChatConversationScreen } from '../communication/chat-conversation-screen';
 import { VoiceCallScreen } from '../communication/voice-call-screen';
 import { VideoCallScreen } from '../communication/video-call-screen';
+import { IncomingCallModal } from '@/components/incoming-call-modal';
 import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
 import { RateBuyerScreen } from '../communication/rate-buyer-screen';
 import { ReportUserScreen } from '../communication/report-user-screen';
@@ -40,7 +41,7 @@ import { NotificationPreferencesScreen } from '../communication/notification-pre
 import { PriceAlertsScreen } from '../communication/price-alerts-screen';
 import { HelpSupportScreen } from '../communication/help-support-screen';
 import { AgroToolsScreen } from '../communication/agro-tools-screen';
-import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { FirestoreChatService, FirestoreCallSession } from '@/services/firestore-chat-service';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -109,12 +110,34 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     mode: 'audio' | 'video';
     conversationId?: string;
     otherUserId?: string;
+    callId?: string;
+    isIncoming?: boolean;
   }>({
     visible: false,
     name: '',
     avatar: '',
     mode: 'audio',
   });
+
+  const [incomingCall, setIncomingCall] = useState<FirestoreCallSession | null>(null);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+    (async () => {
+      const u = await getStoredUser();
+      if (u && isMounted) {
+        const myId = u.id || u._id || '';
+        unsubscribe = FirestoreChatService.listenToIncomingCalls(myId, (call) => {
+          if (isMounted) setIncomingCall(call);
+        });
+      }
+    })();
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [reportTarget, setReportTarget] = useState({
     name: '',
@@ -433,6 +456,23 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         )}
       </View>
 
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        call={incomingCall}
+        onAccept={(call) => {
+          setIncomingCall(null);
+          setActiveCall({
+            visible: true,
+            name: call.callerName,
+            avatar: call.callerAvatar,
+            mode: call.mode,
+            callId: call.id,
+            isIncoming: true,
+          });
+        }}
+        onDecline={() => setIncomingCall(null)}
+      />
+
       {/* Voice Call Modal */}
       {activeCall.visible && activeCall.mode === 'audio' && (
         <VoiceCallScreen
@@ -441,6 +481,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           participantAvatar={activeCall.avatar}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
+          callId={activeCall.callId}
+          isIncoming={activeCall.isIncoming}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
           onSwitchToVideo={() =>
             setActiveCall((prev) => ({ ...prev, mode: 'video' }))
@@ -456,6 +498,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           participantAvatar={activeCall.avatar}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
+          callId={activeCall.callId}
+          isIncoming={activeCall.isIncoming}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
         />
       )}

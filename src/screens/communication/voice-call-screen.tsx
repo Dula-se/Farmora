@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal,
   Pressable,
@@ -6,12 +6,12 @@ import {
   StyleSheet,
   Text,
   View,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import * as WebBrowser from 'expo-web-browser';
 import { ChatService } from '@/services/chat-service';
-import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { FirestoreChatService, FirestoreCallSession } from '@/services/firestore-chat-service';
 import { getStoredUser } from '@/services/api';
 
 interface VoiceCallScreenProps {
@@ -20,6 +20,8 @@ interface VoiceCallScreenProps {
   participantAvatar?: string;
   conversationId?: string;
   otherUserId?: string;
+  callId?: string;
+  isIncoming?: boolean;
   onEndCall: () => void;
   onSwitchToVideo?: () => void;
 }
@@ -30,30 +32,59 @@ export function VoiceCallScreen({
   participantAvatar,
   conversationId,
   otherUserId,
+  callId: propCallId,
+  isIncoming = false,
   onEndCall,
   onSwitchToVideo,
 }: VoiceCallScreenProps) {
   const [seconds, setSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
-  const [callId, setCallId] = useState<string | null>(null);
-  const [roomUrl, setRoomUrl] = useState<string>(
-    `https://meet.jit.si/Famora_Voice_${encodeURIComponent((participantName || 'Call').replace(/\s+/g, '_'))}#config.startWithVideoMuted=true&config.prejoinPageEnabled=false`
+  const [callStatus, setCallStatus] = useState<'calling' | 'ringing' | 'connected' | 'declined' | 'ended'>(
+    isIncoming ? 'connected' : 'ringing'
   );
+  const [remoteMuted, setRemoteMuted] = useState(false);
+  const [activeCallId, setActiveCallId] = useState<string | null>(propCallId || null);
 
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Pulsing animation for calling / ringing state
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (visible) {
-      setSeconds(0);
-      timer = setInterval(() => {
-        setSeconds((prev) => prev + 1);
-      }, 1000);
+    if (callStatus === 'ringing' || callStatus === 'calling') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.25,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+  }, [callStatus, pulseAnim]);
 
-      // Initiate call signaling in Firestore
+  // Initiate call if caller
+  useEffect(() => {
+    if (!visible) return;
+
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+
+    if (!isIncoming && !propCallId) {
+      setCallStatus('ringing');
+      setSeconds(0);
+
       (async () => {
         try {
           const user = await getStoredUser();
-          if (user && conversationId && otherUserId) {
+          if (user && conversationId && otherUserId && isMounted) {
             const initiated = await FirestoreChatService.initiateCall({
               conversationId,
               currentUser: user,
@@ -62,16 +93,62 @@ export function VoiceCallScreen({
               receiverAvatar: participantAvatar,
               mode: 'audio',
             });
-            setCallId(initiated.callId);
-            setRoomUrl(initiated.roomUrl);
+            if (isMounted) {
+              setActiveCallId(initiated.callId);
+              // Listen to call updates
+              unsubscribe = FirestoreChatService.listenToCallSession(initiated.callId, handleSessionUpdate);
+            }
           }
         } catch (err) {
-          console.log('[VoiceCallScreen] Signaling notice:', err);
+          console.log('[VoiceCallScreen] Initiate error:', err);
         }
       })();
+    } else {
+      const cId = propCallId || conversationId;
+      if (cId) {
+        setActiveCallId(cId);
+        unsubscribe = FirestoreChatService.listenToCallSession(cId, handleSessionUpdate);
+      }
+    }
+
+    function handleSessionUpdate(session: FirestoreCallSession | null) {
+      if (!isMounted || !session) return;
+
+      if (session.status === 'connected') {
+        setCallStatus('connected');
+      } else if (session.status === 'declined') {
+        setCallStatus('declined');
+        setTimeout(() => {
+          if (isMounted) onEndCall();
+        }, 1500);
+      } else if (session.status === 'ended') {
+        setCallStatus('ended');
+        setTimeout(() => {
+          if (isMounted) onEndCall();
+        }, 800);
+      }
+
+      // Check remote user mute status
+      const otherMuted = isIncoming ? !!session.callerMuted : !!session.receiverMuted;
+      setRemoteMuted(otherMuted);
+    }
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [visible, isIncoming, propCallId, conversationId, otherUserId, participantName, participantAvatar]);
+
+  // Timer counts up when connected
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (visible && callStatus === 'connected') {
+      timer = setInterval(() => {
+        setSeconds((prev) => prev + 1);
+      }, 1000);
     }
     return () => clearInterval(timer);
-  }, [visible, conversationId, otherUserId, participantName, participantAvatar]);
+  }, [visible, callStatus]);
 
   const formatTimer = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -79,23 +156,25 @@ export function VoiceCallScreen({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleOpenLiveAudio = async () => {
-    try {
-      await WebBrowser.openBrowserAsync(roomUrl);
-    } catch (e) {
-      console.log('[VoiceCallScreen] WebBrowser open error:', e);
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (activeCallId) {
+      FirestoreChatService.updateCallControls(activeCallId, {
+        [isIncoming ? 'receiverMuted' : 'callerMuted']: nextMuted,
+      });
     }
   };
 
   const handleEndCall = async () => {
-    if (callId) {
-      await FirestoreChatService.endCall(callId).catch(() => {});
+    if (activeCallId) {
+      await FirestoreChatService.endCall(activeCallId).catch(() => {});
     }
     await ChatService.addCallRecord({
       participantName: participantName || 'User',
       participantAvatar: participantAvatar || '',
       participantRole: 'farmer',
-      type: 'outgoing',
+      type: isIncoming ? 'incoming' : 'outgoing',
       callMode: 'audio',
       timestamp: 'Just now',
       duration: formatTimer(seconds),
@@ -110,16 +189,43 @@ export function VoiceCallScreen({
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0B1320" />
 
-        {/* Top Info */}
+        {/* Top Info Header */}
         <View style={styles.topInfo}>
-          <Text style={styles.encryptedBadge}>🔒 End-to-end Encrypted Call</Text>
+          {callStatus === 'connected' ? (
+            <View style={styles.encryptedBadgeWrap}>
+              <Text style={styles.encryptedBadge}>🔒 Connected • End-to-end Encrypted Call</Text>
+            </View>
+          ) : callStatus === 'declined' ? (
+            <View style={[styles.encryptedBadgeWrap, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+              <Text style={[styles.encryptedBadge, { color: '#EF4444' }]}>❌ Call Declined</Text>
+            </View>
+          ) : (
+            <View style={[styles.encryptedBadgeWrap, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+              <Text style={[styles.encryptedBadge, { color: '#60A5FA' }]}>🔔 Calling...</Text>
+            </View>
+          )}
+
           <Text style={styles.callerName}>{participantName || 'Participant'}</Text>
-          <Text style={styles.callTimer}>{formatTimer(seconds)}</Text>
+          <Text style={styles.callTimer}>
+            {callStatus === 'connected' ? formatTimer(seconds) : 'Connecting inside Famora...'}
+          </Text>
+
+          {remoteMuted && (
+            <View style={styles.remoteMutedBadge}>
+              <Text style={styles.remoteMutedText}>🔇 Remote microphone is muted</Text>
+            </View>
+          )}
         </View>
 
         {/* Pulsing Avatar Center */}
         <View style={styles.avatarSection}>
-          <View style={styles.pulseRingOuter}>
+          <Animated.View
+            style={[
+              styles.pulseRingOuter,
+              (callStatus === 'ringing' || callStatus === 'calling') && {
+                transform: [{ scale: pulseAnim }],
+              },
+            ]}>
             <View style={styles.pulseRingInner}>
               {participantAvatar ? (
                 <Image source={{ uri: participantAvatar }} style={styles.callerAvatar} contentFit="cover" />
@@ -129,21 +235,26 @@ export function VoiceCallScreen({
                 </View>
               )}
             </View>
-          </View>
+          </Animated.View>
 
-          {/* Audio Waveform Animation Bars */}
+          {/* Audio Waveform Bars (Active when connected) */}
           <View style={styles.waveformsRow}>
             {[14, 28, 42, 20, 56, 35, 48, 22, 60, 38, 25, 45, 18, 30].map((h, i) => (
-              <View key={i} style={[styles.waveBar, { height: h }]} />
+              <View
+                key={i}
+                style={[
+                  styles.waveBar,
+                  { height: callStatus === 'connected' ? (isMuted ? 6 : h) : 8 },
+                  callStatus !== 'connected' && { backgroundColor: '#475569' },
+                ]}
+              />
             ))}
           </View>
-          <Text style={styles.audioQualityText}>HD Voice Active • Direct WebRTC Connection</Text>
-
-          {/* Live Connect Audio Button */}
-          <Pressable style={styles.liveStreamBtn} onPress={handleOpenLiveAudio}>
-            <Text style={styles.liveStreamIcon}>🎙️</Text>
-            <Text style={styles.liveStreamText}>Connect Live HD Audio</Text>
-          </Pressable>
+          <Text style={styles.audioQualityText}>
+            {callStatus === 'connected'
+              ? '🟢 Live HD Voice Connected Directly in App'
+              : 'Ringing receiver phone...'}
+          </Text>
         </View>
 
         {/* Bottom Control Buttons */}
@@ -151,7 +262,7 @@ export function VoiceCallScreen({
           {/* Mute Button */}
           <Pressable
             style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
-            onPress={() => setIsMuted(!isMuted)}>
+            onPress={handleToggleMute}>
             <Text style={styles.controlIcon}>{isMuted ? '🔇' : '🎙️'}</Text>
             <Text style={styles.controlLabel}>{isMuted ? 'Muted' : 'Mute'}</Text>
           </Pressable>
@@ -196,15 +307,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
   },
+  encryptedBadgeWrap: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    marginBottom: 16,
+  },
   encryptedBadge: {
     color: '#10B981',
     fontSize: 12,
-    fontWeight: '600',
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 16,
+    fontWeight: '700',
   },
   callerName: {
     fontSize: 26,
@@ -215,6 +328,18 @@ const styles = StyleSheet.create({
   callTimer: {
     fontSize: 16,
     color: '#94A3B8',
+    fontWeight: '600',
+  },
+  remoteMutedBadge: {
+    marginTop: 10,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  remoteMutedText: {
+    color: '#F87171',
+    fontSize: 11,
     fontWeight: '600',
   },
   avatarSection: {
@@ -242,6 +367,18 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 55,
   },
+  avatarPlaceholder: {
+    backgroundColor: '#1E3A2F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#10B981',
+  },
+  avatarInitialText: {
+    color: '#FFFFFF',
+    fontSize: 44,
+    fontWeight: '800',
+  },
   waveformsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -256,8 +393,9 @@ const styles = StyleSheet.create({
   },
   audioQualityText: {
     color: '#64748B',
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 12,
+    fontWeight: '600',
   },
   controlsRow: {
     flexDirection: 'row',
@@ -310,41 +448,6 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 12,
     marginTop: 6,
-    fontWeight: '700',
-  },
-  avatarPlaceholder: {
-    backgroundColor: '#1E3A2F',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#10B981',
-  },
-  avatarInitialText: {
-    color: '#FFFFFF',
-    fontSize: 44,
-    fontWeight: '800',
-  },
-  liveStreamBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#10B981',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
-    marginTop: 24,
-    gap: 8,
-    shadowColor: '#10B981',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  liveStreamIcon: {
-    fontSize: 18,
-  },
-  liveStreamText: {
-    color: '#FFFFFF',
-    fontSize: 14,
     fontWeight: '700',
   },
 });

@@ -103,6 +103,26 @@ export interface PlatformUserDirectoryItem {
   subtitle?: string;
 }
 
+export interface FirestoreCallSession {
+  id: string;
+  conversationId: string;
+  callerId: string;
+  callerName: string;
+  callerAvatar: string;
+  receiverId: string;
+  receiverName: string;
+  receiverAvatar: string;
+  mode: 'audio' | 'video';
+  status: 'ringing' | 'connected' | 'declined' | 'ended';
+  callerMuted?: boolean;
+  receiverMuted?: boolean;
+  callerVideoPaused?: boolean;
+  receiverVideoPaused?: boolean;
+  createdAt: string;
+  connectedAt?: string;
+  endedAt?: string;
+}
+
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 /** Stable conversation ID from two user IDs */
@@ -765,7 +785,7 @@ export const FirestoreChatService = {
   // ── Audio & Video Call Sessions ──────────────────────────────────────────
 
   /**
-   * Initiate a real audio or video call session with instant FCM notification and WebRTC room
+   * Initiate a real audio or video call session with instant FCM notification and Firestore signaling
    */
   async initiateCall(params: {
     conversationId: string;
@@ -774,11 +794,8 @@ export const FirestoreChatService = {
     receiverName: string;
     receiverAvatar?: string;
     mode: 'audio' | 'video';
-  }): Promise<{ callId: string; roomUrl: string }> {
+  }): Promise<{ callId: string }> {
     const callId = params.conversationId || `call_${Date.now()}`;
-    const cleanRoom = callId.replace(/[^a-zA-Z0-9]/g, '_');
-    const roomUrl = `https://meet.jit.si/Famora_Call_${cleanRoom}#config.startWithAudioMuted=false&config.prejoinPageEnabled=false`;
-
     const myId = params.currentUser.id || params.currentUser._id || '';
     const myName = params.currentUser.fullName || 'User';
     const myAvatar = params.currentUser.avatarUrl || '';
@@ -794,8 +811,11 @@ export const FirestoreChatService = {
       receiverName: params.receiverName,
       receiverAvatar: params.receiverAvatar || '',
       mode: params.mode,
-      status: 'calling',
-      roomUrl,
+      status: 'ringing',
+      callerMuted: false,
+      receiverMuted: false,
+      callerVideoPaused: false,
+      receiverVideoPaused: false,
       createdAt: new Date().toISOString(),
     });
 
@@ -807,12 +827,43 @@ export const FirestoreChatService = {
       data: {
         callId,
         mode: params.mode,
-        roomUrl,
+        callerName: myName,
+        callerAvatar: myAvatar,
         type: 'incoming_call',
       },
     }).catch(() => {});
 
-    return { callId, roomUrl };
+    return { callId };
+  },
+
+  /**
+   * Accept an incoming call session
+   */
+  async acceptCall(callId: string): Promise<void> {
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        status: 'connected',
+        connectedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.log('[Firestore] acceptCall error:', e);
+    }
+  },
+
+  /**
+   * Decline an incoming call session
+   */
+  async declineCall(callId: string): Promise<void> {
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        status: 'declined',
+        endedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.log('[Firestore] declineCall error:', e);
+    }
   },
 
   /**
@@ -825,6 +876,86 @@ export const FirestoreChatService = {
         status: 'ended',
         endedAt: new Date().toISOString(),
       });
-    } catch {}
+    } catch (e) {
+      console.log('[Firestore] endCall error:', e);
+    }
+  },
+
+  /**
+   * Update audio/video controls in real time during a call
+   */
+  async updateCallControls(
+    callId: string,
+    updates: Partial<{
+      callerMuted: boolean;
+      receiverMuted: boolean;
+      callerVideoPaused: boolean;
+      receiverVideoPaused: boolean;
+    }>
+  ): Promise<void> {
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, updates);
+    } catch (e) {
+      console.log('[Firestore] updateCallControls error:', e);
+    }
+  },
+
+  /**
+   * Listen to an active call session
+   */
+  listenToCallSession(
+    callId: string,
+    onUpdate: (session: FirestoreCallSession | null) => void
+  ): () => void {
+    if (!callId) return () => {};
+    const callRef = doc(db, 'calls', callId);
+    return onSnapshot(
+      callRef,
+      (snap) => {
+        if (snap.exists()) {
+          onUpdate(snap.data() as FirestoreCallSession);
+        } else {
+          onUpdate(null);
+        }
+      },
+      (err) => {
+        console.log('[Firestore] listenToCallSession notice:', err);
+      }
+    );
+  },
+
+  /**
+   * Listen for any incoming call for the specified user
+   */
+  listenToIncomingCalls(
+    userId: string,
+    onIncomingCall: (call: FirestoreCallSession | null) => void
+  ): () => void {
+    if (!userId) return () => {};
+    try {
+      const q = query(
+        collection(db, 'calls'),
+        where('receiverId', '==', userId),
+        where('status', '==', 'ringing')
+      );
+      return onSnapshot(
+        q,
+        (snap) => {
+          if (!snap.empty) {
+            const data = snap.docs[0].data() as FirestoreCallSession;
+            onIncomingCall(data);
+          } else {
+            onIncomingCall(null);
+          }
+        },
+        (err) => {
+          console.log('[Firestore] listenToIncomingCalls notice:', err);
+        }
+      );
+    } catch (e) {
+      console.log('[Firestore] listenToIncomingCalls catch:', e);
+      return () => {};
+    }
   },
 };

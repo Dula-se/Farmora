@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Alert,
   Platform,
@@ -37,6 +37,8 @@ import { MessagesListScreen } from '../communication/messages-list-screen';
 import { ChatConversationScreen } from '../communication/chat-conversation-screen';
 import { VoiceCallScreen } from '../communication/voice-call-screen';
 import { VideoCallScreen } from '../communication/video-call-screen';
+import { IncomingCallModal } from '@/components/incoming-call-modal';
+import { FirestoreCallSession } from '@/services/firestore-chat-service';
 import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
 import { RateExperienceScreen } from '../communication/rate-experience-screen';
 import { ReportUserScreen } from '../communication/report-user-screen';
@@ -120,12 +122,34 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     mode: 'audio' | 'video';
     conversationId?: string;
     otherUserId?: string;
+    callId?: string;
+    isIncoming?: boolean;
   }>({
     visible: false,
     name: '',
     avatar: '',
     mode: 'audio',
   });
+
+  const [incomingCall, setIncomingCall] = useState<FirestoreCallSession | null>(null);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+    (async () => {
+      const u = await getStoredUser();
+      if (u && isMounted) {
+        const myId = u.id || u._id || '';
+        unsubscribe = FirestoreChatService.listenToIncomingCalls(myId, (call) => {
+          if (isMounted) setIncomingCall(call);
+        });
+      }
+    })();
+    return () => {
+      isMounted = false;
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ name: string; avatar: string }>({
@@ -638,6 +662,23 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
         )}
       </View>
 
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        call={incomingCall}
+        onAccept={(call) => {
+          setIncomingCall(null);
+          setActiveCall({
+            visible: true,
+            name: call.callerName,
+            avatar: call.callerAvatar,
+            mode: call.mode,
+            callId: call.id,
+            isIncoming: true,
+          });
+        }}
+        onDecline={() => setIncomingCall(null)}
+      />
+
       {/* Voice Call Modal */}
       {activeCall.visible && activeCall.mode === 'audio' && (
         <VoiceCallScreen
@@ -646,6 +687,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           participantAvatar={activeCall.avatar}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
+          callId={activeCall.callId}
+          isIncoming={activeCall.isIncoming}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
           onSwitchToVideo={() =>
             setActiveCall((prev) => ({ ...prev, mode: 'video' }))
@@ -661,6 +704,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           participantAvatar={activeCall.avatar}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
+          callId={activeCall.callId}
+          isIncoming={activeCall.isIncoming}
           onEndCall={() => setActiveCall((prev) => ({ ...prev, visible: false }))}
         />
       )}
