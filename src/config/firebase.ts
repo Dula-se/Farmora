@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeAuth, getAuth } from 'firebase/auth';
 // @ts-expect-error - Metro bundler resolves the React Native entry point which exports getReactNativePersistence
 import { getReactNativePersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -32,7 +32,17 @@ try {
   authInstance = getAuth(app);
 }
 
+// Initialize Firestore with experimentalForceLongPolling for robust React Native connection
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  });
+} catch {
+  dbInstance = getFirestore(app);
+}
+
 export const auth = authInstance;
-export const db = getFirestore(app);
+export const db = dbInstance;
 export const storage = getStorage(app);
 export default app;

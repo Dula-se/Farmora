@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import { clearAuthSession } from '@/services/api';
+import { clearAuthSession, getStoredUser, ApiUser } from '@/services/api';
 import { FarmerDashboardScreen } from './farmer-dashboard-screen';
 import { MyProductsScreen } from './my-products-screen';
 import { AddProductWizard } from './add-product-wizard';
@@ -24,6 +24,7 @@ import { FarmerProfileWizard } from './farmer-profile-wizard';
 import { FarmerPrivacyScreen } from './farmer-privacy-screen';
 import { FarmerVerificationFlow } from './farmer-verification-flow';
 import { FarmerPublicProfileScreen } from '../buyer/farmer-public-profile-screen';
+import { FarmerProfileScreen } from './farmer-profile-screen';
 
 // Orders & Communication screens
 import { FarmerOrdersScreen } from './farmer-orders-screen';
@@ -39,7 +40,7 @@ import { NotificationPreferencesScreen } from '../communication/notification-pre
 import { PriceAlertsScreen } from '../communication/price-alerts-screen';
 import { HelpSupportScreen } from '../communication/help-support-screen';
 import { AgroToolsScreen } from '../communication/agro-tools-screen';
-import { ChatService } from '@/services/chat-service';
+import { FirestoreChatService } from '@/services/firestore-chat-service';
 
 export type FarmerScreenView =
   | 'dashboard'
@@ -76,9 +77,27 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
   const [currentView, setCurrentView] = useState<FarmerScreenView>('dashboard');
   const [activeTab, setActiveTab] = useState<FarmerTab>('dashboard');
   const [newlyAddedTitle, setNewlyAddedTitle] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+
+  React.useEffect(() => {
+    getStoredUser().then((u) => {
+      if (u) setCurrentUser(u);
+    });
+  }, [currentView]);
 
   // Communication & Call States
-  const [activeChatId, setActiveChatId] = useState<string>('c1');
+  const [activeChatMeta, setActiveChatMeta] = useState<{
+    conversationId: string;
+    otherUserId: string;
+    otherUserName: string;
+    otherUserAvatar?: string;
+    otherUserRole?: 'farmer' | 'buyer';
+  }>({
+    conversationId: '',
+    otherUserId: '',
+    otherUserName: 'Buyer',
+    otherUserRole: 'buyer',
+  });
   const [activeBuyerForRating, setActiveBuyerForRating] = useState({
     id: 'buyer-sunil',
     name: 'Sunil Dissanayake',
@@ -111,15 +130,35 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     setCurrentView('products');
   };
 
-  const handleStartChatWithBuyer = async (buyerName: string) => {
-    const conv = await ChatService.getOrCreateConversation({
-      participantId: `buyer-${buyerName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-      participantName: buyerName,
-      participantRole: 'buyer',
-      productTitle: 'Highland Farm Harvest',
-    });
-    setActiveChatId(conv.id);
-    setCurrentView('chat-conversation');
+  const handleStartChatWithBuyer = async (buyerIdOrName: string, buyerName?: string, buyerAvatar?: string) => {
+    const user = await getStoredUser();
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in to chat.');
+      return;
+    }
+    const resolvedId = buyerName ? buyerIdOrName : `buyer-${buyerIdOrName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    const resolvedName = buyerName || buyerIdOrName;
+    try {
+      const convId = await FirestoreChatService.getOrCreateConversation({
+        currentUser: user,
+        otherUserId: resolvedId,
+        otherUserName: resolvedName,
+        otherUserRole: 'buyer',
+        otherUserAvatar: buyerAvatar || '',
+        productTitle: 'Farm Direct Order Chat',
+      });
+      setActiveChatMeta({
+        conversationId: convId,
+        otherUserId: resolvedId,
+        otherUserName: resolvedName,
+        otherUserAvatar: buyerAvatar || '',
+        otherUserRole: 'buyer',
+      });
+      setCurrentView('chat-conversation');
+    } catch (e) {
+      console.error('[Chat] handleStartChatWithBuyer error:', e);
+      Alert.alert('Error', 'Could not open conversation with this buyer.');
+    }
   };
 
   const isFullScreen =
@@ -199,8 +238,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         {/* Real Interactive Orders Screen */}
         {currentView === 'orders' && (
           <FarmerOrdersScreen
-            onChatBuyer={(buyerName) => {
-              handleStartChatWithBuyer(buyerName);
+            onChatBuyer={(buyerName, buyerId) => {
+              handleStartChatWithBuyer(buyerId || 'buyer-1', buyerName);
             }}
             onRateBuyer={(buyerName, buyerId) => {
               setActiveBuyerForRating({ id: buyerId, name: buyerName });
@@ -220,8 +259,15 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         {/* Real Messages List Screen */}
         {currentView === 'messages' && (
           <MessagesListScreen
-            onOpenConversation={(convId: string) => {
-              setActiveChatId(convId);
+            currentRole="farmer"
+            onOpenConversation={(convId, oId, oName, oAvatar, oRole) => {
+              setActiveChatMeta({
+                conversationId: convId,
+                otherUserId: oId,
+                otherUserName: oName,
+                otherUserAvatar: oAvatar,
+                otherUserRole: oRole,
+              });
               setCurrentView('chat-conversation');
             }}
             onStartCall={(name, avatar, mode) => {
@@ -238,7 +284,11 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         {/* 1-on-1 Chat Screen with Negotiation Cards & Base64 Photos */}
         {currentView === 'chat-conversation' && (
           <ChatConversationScreen
-            conversationId={activeChatId}
+            conversationId={activeChatMeta.conversationId}
+            otherUserId={activeChatMeta.otherUserId}
+            otherUserName={activeChatMeta.otherUserName}
+            otherUserAvatar={activeChatMeta.otherUserAvatar}
+            otherUserRole={activeChatMeta.otherUserRole}
             currentRole="farmer"
             onBack={() => setCurrentView('messages')}
             onStartAudioCall={(name, avatar) => {
@@ -310,132 +360,17 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
         )}
 
         {currentView === 'profile' && (
-          <SafeAreaView style={styles.profileContainer}>
-            <ScrollView
-              contentContainerStyle={styles.profileScrollContent}
-              showsVerticalScrollIndicator={false}>
-              <View style={styles.profileHeader}>
-                <View style={styles.profileAvatarLarge}>
-                  <Text style={{ fontSize: 32 }}>👨‍🌾</Text>
-                </View>
-                <Text style={styles.profileName}>Kamal Gunawardana</Text>
-                <Text style={styles.profileFarm}>Govigedara Organic Farm • Nuwara Eliya</Text>
-                <View style={styles.verifiedFarmerBadge}>
-                  <Text style={styles.verifiedFarmerText}>✓ Certified Verified Farmer</Text>
-                </View>
-              </View>
-
-              {/* Action Buttons List */}
-              <View style={styles.profileMenuSection}>
-                {/* 1. Verification Center */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('verification')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#DCFCE7' }]}>
-                    <Text style={{ fontSize: 18 }}>🛡️</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Get Verified</Text>
-                    <Text style={styles.menuItemSub}>Upload NIC, certifications & land evidence</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 2. Agro Tools, Subsidies & Weather */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('agro-tools')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#DCFCE7' }]}>
-                    <Text style={{ fontSize: 18 }}>🌾</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Agro Tools & Subsidies</Text>
-                    <Text style={styles.menuItemSub}>Weather, calendar, subsidies, eco footprint</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 3. Price Alerts */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('price-alerts')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#FEF3C7' }]}>
-                    <Text style={{ fontSize: 18 }}>📈</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Price Watch & Alerts</Text>
-                    <Text style={styles.menuItemSub}>Manning & Dambulla wholesale index</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 4. Help & Support */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('help-support')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#EFF6FF' }]}>
-                    <Text style={{ fontSize: 18 }}>📞</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Help & 24/7 Hotline</Text>
-                    <Text style={styles.menuItemSub}>Direct agronomy hotline & FAQs</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 5. Privacy Settings */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('privacy')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#F1F5F9' }]}>
-                    <Text style={{ fontSize: 18 }}>🔒</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Privacy & Security</Text>
-                    <Text style={styles.menuItemSub}>Control visibility, data download & policy</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 6. View Public Profile */}
-                <Pressable
-                  style={styles.profileMenuItem}
-                  onPress={() => setCurrentView('farmer-public-profile')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#EFF6FF' }]}>
-                    <Text style={{ fontSize: 18 }}>👁️</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>View Public Profile</Text>
-                    <Text style={styles.menuItemSub}>See how buyers and restaurants view your farm</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-
-                {/* 7. Farm Profile Onboarding Wizard */}
-                <Pressable
-                  style={[styles.profileMenuItem, { borderBottomWidth: 0 }]}
-                  onPress={() => setCurrentView('onboarding-wizard')}>
-                  <View style={[styles.menuIconBox, { backgroundColor: '#FEF3C7' }]}>
-                    <Text style={{ fontSize: 18 }}>⚙️</Text>
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.menuItemTitle}>Farm Setup Checklist</Text>
-                    <Text style={styles.menuItemSub}>Delivery & payment preferences</Text>
-                  </View>
-                  <Text style={styles.menuArrow}>›</Text>
-                </Pressable>
-              </View>
-
-              <Pressable
-                style={styles.logoutBtn}
-                onPress={async () => {
-                  await clearAuthSession();
-                  onBackToAuth();
-                }}>
-                <Text style={styles.logoutBtnText}>Sign Out of Farm Account</Text>
-              </Pressable>
-            </ScrollView>
-          </SafeAreaView>
+          <FarmerProfileScreen
+            onOpenVerification={() => setCurrentView('verification')}
+            onOpenPublicProfile={() => setCurrentView('farmer-public-profile')}
+            onOpenAgroTools={() => setCurrentView('agro-tools')}
+            onOpenPriceAlerts={() => setCurrentView('price-alerts')}
+            onOpenTrustScore={() => setCurrentView('farmer-trust-score')}
+            onOpenWizard={() => setCurrentView('onboarding-wizard')}
+            onOpenPrivacy={() => setCurrentView('privacy')}
+            onOpenHelpSupport={() => setCurrentView('help-support')}
+            onLogout={onBackToAuth}
+          />
         )}
 
         {currentView === 'privacy' && (
@@ -464,7 +399,8 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
 
         {currentView === 'farmer-public-profile' && (
           <FarmerPublicProfileScreen
-            farmerName="Kamal Gunawardana"
+            farmerId={currentUser?.id || 'kamal-gunawardana'}
+            farmerName={currentUser?.fullName || 'Kamal Gunawardana'}
             onBack={() => {
               setActiveTab('profile');
               setCurrentView('profile');
@@ -507,16 +443,18 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
       {/* Schedule Live Video Inspection Modal */}
       <ScheduleInspectionModal
         visible={showScheduleModal}
-        farmerName="Sunil Dissanayake"
+        farmerName={activeCall.name || 'Buyer'}
         onClose={() => setShowScheduleModal(false)}
-        onScheduled={(details) => {
+        onScheduled={async (details) => {
           setShowScheduleModal(false);
-          ChatService.sendMessage(activeChatId, {
-            senderId: 'current-farmer',
-            senderName: 'You',
-            senderRole: 'farmer',
-            text: `📅 Scheduled Farm Inspection confirmed for ${details.date} at ${details.time}`,
-          });
+          const user = await getStoredUser();
+          if (user && activeChatMeta.conversationId) {
+            await FirestoreChatService.sendMessage({
+              conversationId: activeChatMeta.conversationId,
+              currentUser: user,
+              text: `📅 Scheduled Farm Inspection confirmed for ${details.date} at ${details.time}`,
+            });
+          }
         }}
       />
 

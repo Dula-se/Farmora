@@ -1,7 +1,15 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * messages-list-screen.tsx
+ *
+ * Real-time conversations list powered by Firebase Firestore.
+ * Shows only real registered farmers and buyers (no mock demos).
+ * Supports starting real chats with any active farmer or buyer on the platform.
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
 import {
   FlatList,
-  Platform,
+  Modal,
   Pressable,
   RefreshControl,
   StatusBar,
@@ -9,19 +17,27 @@ import {
   Text,
   TextInput,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import {
-  ChatService,
-  Conversation,
-  CallRecord,
-} from '@/services/chat-service';
+  FirestoreChatService,
+  FirestoreConversation,
+  PlatformUserDirectoryItem,
+} from '@/services/firestore-chat-service';
+import { getStoredUser, ApiUser } from '@/services/api';
 
 interface MessagesListScreenProps {
   onBack?: () => void;
-  onOpenConversation: (conversationId: string) => void;
+  onOpenConversation: (
+    conversationId: string,
+    otherUserId: string,
+    otherUserName: string,
+    otherUserAvatar: string,
+    otherUserRole: 'farmer' | 'buyer'
+  ) => void;
   onStartCall?: (participantName: string, participantAvatar: string, mode: 'audio' | 'video') => void;
   currentRole?: 'buyer' | 'farmer';
 }
@@ -32,48 +48,135 @@ export function MessagesListScreen({
   onStartCall,
   currentRole = 'buyer',
 }: MessagesListScreenProps) {
-  const [activeTab, setActiveTab] = useState<'chats' | 'calls'>('chats');
-  const [filterType, setFilterType] = useState<'all' | 'unread' | 'farmers' | 'buyers'>('all');
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [conversations, setConversations] = useState<FirestoreConversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [calls, setCalls] = useState<CallRecord[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const loadData = async () => {
-    const convs = await ChatService.getConversations();
-    const callLogs = await ChatService.getCallHistory();
-    setConversations(convs);
-    setCalls(callLogs);
-    setRefreshing(false);
-  };
+  // New Chat Modal with real platform farmers/buyers
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [platformUsers, setPlatformUsers] = useState<PlatformUserDirectoryItem[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [startingChatWithId, setStartingChatWithId] = useState<string | null>(null);
+
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    loadData();
+    initListener();
+    return () => unsubscribeRef.current?.();
   }, []);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadData();
+  const initListener = async () => {
+    const user = await getStoredUser();
+    setCurrentUser(user);
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    // Sync self into Firestore directory
+    FirestoreChatService.syncUserToFirestore(user);
+
+    const myId = user.id || user._id || '';
+
+    const unsub = FirestoreChatService.listenToConversations(myId, (convs) => {
+      setConversations(convs);
+      setLoading(false);
+    });
+    unsubscribeRef.current = unsub;
   };
 
-  const filteredConversations = conversations.filter((c) => {
-    const matchSearch =
-      c.participantName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.productTitle && c.productTitle.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      c.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
+  const handleOpenNewChatModal = async () => {
+    setShowNewChatModal(true);
+    setLoadingUsers(true);
+    const targetRole = currentRole === 'buyer' ? 'farmer' : 'buyer';
+    const myId = currentUser?.id || currentUser?._id || '';
+    const users = await FirestoreChatService.fetchPlatformUsers(targetRole, myId);
+    setPlatformUsers(users);
+    setLoadingUsers(false);
+  };
 
-    if (!matchSearch) return false;
-    if (filterType === 'unread') return c.unreadCount > 0;
-    if (filterType === 'farmers') return c.participantRole === 'farmer';
-    if (filterType === 'buyers') return c.participantRole === 'buyer';
-    return true;
+  const handleSelectUserToChat = async (targetUser: PlatformUserDirectoryItem) => {
+    if (!currentUser) return;
+    setStartingChatWithId(targetUser.id);
+    try {
+      const convId = await FirestoreChatService.getOrCreateConversation({
+        currentUser,
+        otherUserId: targetUser.id,
+        otherUserName: targetUser.fullName,
+        otherUserRole: targetUser.role,
+        otherUserAvatar: targetUser.avatarUrl,
+      });
+
+      setShowNewChatModal(false);
+      onOpenConversation(
+        convId,
+        targetUser.id,
+        targetUser.fullName,
+        targetUser.avatarUrl,
+        targetUser.role
+      );
+    } catch (e) {
+      console.error('[NewChat] Error starting conversation:', e);
+    } finally {
+      setStartingChatWithId(null);
+    }
+  };
+
+  const myId = currentUser?.id || currentUser?._id || '';
+
+  const filtered = conversations.filter((c) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const participants = Object.values(c.participantNames || {}).join(' ').toLowerCase();
+    return (
+      participants.includes(q) ||
+      (c.productTitle || '').toLowerCase().includes(q) ||
+      (c.lastMessage || '').toLowerCase().includes(q)
+    );
   });
+
+  const getOtherUserId = (conv: FirestoreConversation): string =>
+    conv.participants.find((p) => p !== myId) || '';
+
+  const getOtherName = (conv: FirestoreConversation): string => {
+    const otherId = getOtherUserId(conv);
+    return conv.participantNames?.[otherId] || 'User';
+  };
+
+  const getOtherAvatar = (conv: FirestoreConversation): string => {
+    const otherId = getOtherUserId(conv);
+    return conv.participantAvatars?.[otherId] || '';
+  };
+
+  const getOtherRole = (conv: FirestoreConversation): 'farmer' | 'buyer' => {
+    const otherId = getOtherUserId(conv);
+    return conv.participantRoles?.[otherId] || (currentRole === 'buyer' ? 'farmer' : 'buyer');
+  };
+
+  const getUnread = (conv: FirestoreConversation): number =>
+    conv.unreadCounts?.[myId] || 0;
+
+  const fmtTime = (iso: string): string => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const now = new Date();
+      const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+      if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return d.toLocaleDateString([], { weekday: 'short' });
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Top Header */}
+      {/* Header */}
       <View style={styles.header}>
         {onBack ? (
           <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
@@ -82,45 +185,25 @@ export function MessagesListScreen({
             </Svg>
           </Pressable>
         ) : (
-          <View style={{ width: 24 }} />
+          <View style={{ width: 34 }} />
         )}
         <Text style={styles.headerTitle}>Messages</Text>
         <Pressable
           style={styles.newChatBtn}
-          onPress={() => onOpenConversation('c1')}>
-          <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#1E5E3A" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-            <Path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <Path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-          </Svg>
+          onPress={handleOpenNewChatModal}
+          hitSlop={8}>
+          <Text style={styles.newChatBtnTxt}>+ New Chat</Text>
         </Pressable>
       </View>
 
-      {/* Segment Switcher: Chats vs Calls */}
-      <View style={styles.segmentContainer}>
-        <Pressable
-          style={[styles.segmentBtn, activeTab === 'chats' && styles.segmentBtnActive]}
-          onPress={() => setActiveTab('chats')}>
-          <Text style={[styles.segmentBtnText, activeTab === 'chats' && styles.segmentBtnTextActive]}>
-            Chats ({conversations.reduce((acc, c) => acc + (c.unreadCount > 0 ? 1 : 0), 0)} unread)
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentBtn, activeTab === 'calls' && styles.segmentBtnActive]}
-          onPress={() => setActiveTab('calls')}>
-          <Text style={[styles.segmentBtnText, activeTab === 'calls' && styles.segmentBtnTextActive]}>
-            Calls ({calls.length})
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* Search Input Bar */}
+      {/* Search */}
       <View style={styles.searchBar}>
-        <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
           <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </Svg>
         <TextInput
           style={styles.searchInput}
-          placeholder={activeTab === 'chats' ? 'Search messages or crops...' : 'Search call history...'}
+          placeholder="Search real conversations..."
           placeholderTextColor="#94A3B8"
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -132,393 +215,317 @@ export function MessagesListScreen({
         )}
       </View>
 
-      {/* Filter Chips for Chats */}
-      {activeTab === 'chats' && (
-        <View style={styles.filterRow}>
-          {(['all', 'unread', 'farmers', 'buyers'] as const).map((ft) => (
-            <Pressable
-              key={ft}
-              style={[styles.filterChip, filterType === ft && styles.filterChipActive]}
-              onPress={() => setFilterType(ft)}>
-              <Text style={[styles.filterChipText, filterType === ft && styles.filterChipTextActive]}>
-                {ft === 'all' && 'All'}
-                {ft === 'unread' && 'Unread'}
-                {ft === 'farmers' && 'Farmers'}
-                {ft === 'buyers' && 'Buyers'}
-              </Text>
-            </Pressable>
-          ))}
+      {/* List */}
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#1E5E3A" />
+          <Text style={{ color: '#64748B', fontSize: 14, marginTop: 12 }}>Loading conversations...</Text>
         </View>
-      )}
-
-      {/* Content: Conversation List or Call Logs */}
-      {activeTab === 'chats' ? (
+      ) : filtered.length === 0 ? (
+        <View style={styles.center}>
+          <Text style={{ fontSize: 44, marginBottom: 8 }}>💬</Text>
+          <Text style={styles.emptyTitle}>No conversations yet</Text>
+          <Text style={styles.emptySub}>
+            {currentRole === 'buyer'
+              ? 'Connect directly with verified farmers to negotiate prices and send voice notes.'
+              : 'Buyers will contact you directly through your listed harvests.'}
+          </Text>
+          <Pressable style={styles.startFirstChatBtn} onPress={handleOpenNewChatModal}>
+            <Text style={styles.startFirstChatTxt}>
+              {currentRole === 'buyer' ? '🌾 Chat with a Real Farmer' : '🛒 Chat with a Buyer'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : (
         <FlatList
-          data={filteredConversations}
+          data={filtered}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1E5E3A" />}
+          refreshControl={
+            <RefreshControl refreshing={false} onRefresh={initListener} tintColor="#1E5E3A" />
+          }
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.convCard, pressed && styles.convCardPressed]}
-              onPress={() => onOpenConversation(item.id)}>
-              {/* Avatar with Online indicator */}
-              <View style={styles.avatarWrap}>
-                <Image source={{ uri: item.participantAvatar }} style={styles.avatarImg} contentFit="cover" />
-                {item.isOnline && <View style={styles.onlineDot} />}
-              </View>
+          renderItem={({ item }) => {
+            const otherId = getOtherUserId(item);
+            const otherName = getOtherName(item);
+            const otherAvatar = getOtherAvatar(item);
+            const otherRole = getOtherRole(item);
+            const unread = getUnread(item);
 
-              {/* Chat Info */}
-              <View style={styles.convMain}>
-                <View style={styles.convHeaderRow}>
-                  <View style={styles.nameBadgeRow}>
-                    <Text style={styles.participantName} numberOfLines={1}>
-                      {item.participantName}
-                    </Text>
-                    {item.verified && (
-                      <View style={styles.verifiedTick}>
-                        <Text style={styles.verifiedTickText}>✓</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.timeText}>{item.lastMessageTime}</Text>
-                </View>
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.convCard, pressed && styles.convCardPressed]}
+                onPress={() => onOpenConversation(item.id, otherId, otherName, otherAvatar, otherRole)}>
 
-                {/* Product Reference Chip */}
-                {item.productTitle && (
-                  <View style={styles.cropRefBadge}>
-                    <Text style={styles.cropRefText}>🌱 {item.productTitle}</Text>
-                  </View>
-                )}
-
-                {/* Message preview & Unread badge */}
-                <View style={styles.convFooterRow}>
-                  <Text
-                    style={[styles.lastMsgText, item.unreadCount > 0 && styles.lastMsgUnread]}
-                    numberOfLines={1}>
-                    {item.lastMessage}
-                  </Text>
-                  {item.unreadCount > 0 && (
-                    <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+                {/* Avatar */}
+                <View style={styles.avatarWrap}>
+                  {otherAvatar ? (
+                    <Image source={{ uri: otherAvatar }} style={styles.avatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 18 }}>
+                        {otherName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  {otherRole === 'farmer' && (
+                    <View style={styles.roleDot}>
+                      <Text style={{ fontSize: 8 }}>🌾</Text>
                     </View>
                   )}
                 </View>
-              </View>
-            </Pressable>
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={{ fontSize: 40 }}>💬</Text>
-              <Text style={styles.emptyTitle}>No messages found</Text>
-              <Text style={styles.emptySub}>
-                Inquire about produce listings or send price offers to start chatting.
-              </Text>
-            </View>
-          }
-        />
-      ) : (
-        /* Calls Log Tab */
-        <FlatList
-          data={calls}
-          keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1E5E3A" />}
-          contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <View style={styles.callCard}>
-              <Image source={{ uri: item.participantAvatar }} style={styles.avatarImg} contentFit="cover" />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.participantName}>{item.participantName}</Text>
-                <View style={styles.callMetaRow}>
-                  <Text style={{ fontSize: 12, marginRight: 4 }}>
-                    {item.type === 'incoming' && '↙️'}
-                    {item.type === 'outgoing' && '↗️'}
-                    {item.type === 'missed' && '❌'}
-                  </Text>
-                  <Text style={[styles.callTypeText, item.type === 'missed' && { color: '#EF4444' }]}>
-                    {item.callMode === 'video' ? 'Video Call' : 'Audio Call'} • {item.timestamp}
-                  </Text>
-                  {item.duration && <Text style={styles.callDuration}>({item.duration})</Text>}
+
+                {/* Content */}
+                <View style={styles.convContent}>
+                  <View style={styles.convTop}>
+                    <Text style={[styles.convName, unread > 0 && styles.convNameBold]} numberOfLines={1}>
+                      {otherName}
+                    </Text>
+                    <Text style={[styles.convTime, unread > 0 && styles.convTimeUnread]}>
+                      {fmtTime(item.lastMessageTime)}
+                    </Text>
+                  </View>
+
+                  {item.productTitle ? (
+                    <View style={styles.productChip}>
+                      <Text style={styles.productChipTxt} numberOfLines={1}>🌱 {item.productTitle}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.convBottom}>
+                    <Text
+                      style={[styles.lastMsg, unread > 0 && styles.lastMsgUnread]}
+                      numberOfLines={1}>
+                      {item.lastMessage}
+                    </Text>
+                    {unread > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadTxt}>{unread > 99 ? '99+' : unread}</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-              <Pressable
-                style={styles.callBackBtn}
-                onPress={() => onStartCall?.(item.participantName, item.participantAvatar, item.callMode)}>
-                <Text style={{ fontSize: 16 }}>{item.callMode === 'video' ? '📹' : '📞'}</Text>
               </Pressable>
-            </View>
-          )}
+            );
+          }}
         />
       )}
+
+      {/* Real Users Directory Modal (Start New Chat) */}
+      <Modal
+        visible={showNewChatModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowNewChatModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>
+                  {currentRole === 'buyer' ? 'Real Verified Farmers' : 'Real Platform Buyers'}
+                </Text>
+                <Text style={styles.modalSub}>
+                  Select any active member to start a live 1-on-1 chat
+                </Text>
+              </View>
+              <Pressable onPress={() => setShowNewChatModal(false)} hitSlop={10} style={styles.closeBtn}>
+                <Text style={{ fontSize: 20, color: '#64748B' }}>✕</Text>
+              </Pressable>
+            </View>
+
+            {loadingUsers ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#1E5E3A" />
+                <Text style={{ marginTop: 10, color: '#64748B', fontSize: 13 }}>
+                  Fetching verified members...
+                </Text>
+              </View>
+            ) : platformUsers.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center', paddingHorizontal: 20 }}>
+                <Text style={{ fontSize: 32, marginBottom: 8 }}>👨‍🌾</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F172A', textAlign: 'center' }}>
+                  No members found
+                </Text>
+                <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 4 }}>
+                  Browse produce in the marketplace and click 'Chat' on any listing.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={platformUsers}
+                keyExtractor={(u) => u.id}
+                contentContainerStyle={{ paddingVertical: 8 }}
+                renderItem={({ item: u }) => (
+                  <Pressable
+                    style={styles.userItem}
+                    disabled={startingChatWithId === u.id}
+                    onPress={() => handleSelectUserToChat(u)}>
+                    <View style={styles.avatarWrap}>
+                      {u.avatarUrl ? (
+                        <Image source={{ uri: u.avatarUrl }} style={styles.avatar} contentFit="cover" />
+                      ) : (
+                        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                          <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 18 }}>
+                            {u.fullName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      {u.role === 'farmer' && (
+                        <View style={styles.roleDot}>
+                          <Text style={{ fontSize: 8 }}>🌾</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.userName} numberOfLines={1}>{u.fullName}</Text>
+                      {u.subtitle ? (
+                        <Text style={styles.userSub} numberOfLines={1}>{u.subtitle}</Text>
+                      ) : null}
+                    </View>
+
+                    {startingChatWithId === u.id ? (
+                      <ActivityIndicator size="small" color="#1E5E3A" />
+                    ) : (
+                      <View style={styles.chatActionBadge}>
+                        <Text style={styles.chatActionBadgeTxt}>Chat</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
   },
-  backBtn: {
-    padding: 6,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
+  backBtn: { padding: 6 },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
   newChatBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
     backgroundColor: '#F0FDF4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segmentContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    marginHorizontal: 16,
-    marginTop: 10,
-    borderRadius: 12,
-    padding: 4,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  segmentBtnActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  segmentBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  segmentBtnTextActive: {
-    color: '#1E5E3A',
-    fontWeight: '700',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#0F172A',
-    padding: 0,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 4,
-    gap: 8,
-  },
-  filterChip: {
+    borderColor: '#BBF7D0',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: '#F1F5F9',
   },
-  filterChipActive: {
+  newChatBtnTxt: { fontSize: 13, fontWeight: '700', color: '#166534' },
+
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginVertical: 10,
+    backgroundColor: '#F8FAFC', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderWidth: 1, borderColor: '#E2E8F0', gap: 8,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: '#0F172A', padding: 0 },
+
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginTop: 8 },
+  emptySub: { fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 6, lineHeight: 18 },
+  startFirstChatBtn: {
     backgroundColor: '#1E5E3A',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 20,
   },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  filterChipTextActive: {
-    color: '#FFFFFF',
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
+  startFirstChatTxt: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+
+  listContent: { paddingVertical: 4 },
   convCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC',
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#F8FAFC',
   },
-  convCardPressed: {
-    backgroundColor: '#F8FAFC',
+  convCardPressed: { backgroundColor: '#F8FAFC' },
+
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 50, height: 50, borderRadius: 25 },
+  avatarPlaceholder: { backgroundColor: '#1E5E3A', alignItems: 'center', justifyContent: 'center' },
+  roleDot: {
+    position: 'absolute', bottom: -2, right: -2,
+    backgroundColor: '#DCFCE7', borderRadius: 8,
+    width: 16, height: 16, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#FFF',
   },
-  avatarWrap: {
-    position: 'relative',
-  },
-  avatarImg: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#E2E8F0',
-  },
-  onlineDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#22C55E',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  convMain: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  convHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  nameBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 8,
-  },
-  participantName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  verifiedTick: {
-    marginLeft: 4,
-    backgroundColor: '#1E5E3A',
-    borderRadius: 8,
-    width: 14,
-    height: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  verifiedTickText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  timeText: {
-    fontSize: 11,
-    color: '#94A3B8',
-  },
-  cropRefBadge: {
+
+  convContent: { flex: 1, marginLeft: 12 },
+  convTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  convName: { fontSize: 15, fontWeight: '600', color: '#0F172A', flex: 1 },
+  convNameBold: { fontWeight: '800' },
+  convTime: { fontSize: 12, color: '#94A3B8', marginLeft: 8 },
+  convTimeUnread: { color: '#1E5E3A', fontWeight: '700' },
+
+  productChip: {
     alignSelf: 'flex-start',
-    backgroundColor: '#F0FDF4',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginTop: 3,
+    backgroundColor: '#F0FDF4', borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+    marginVertical: 3,
   },
-  cropRefText: {
-    fontSize: 11,
-    color: '#166534',
-    fontWeight: '600',
+  productChipTxt: { fontSize: 11, color: '#166534', fontWeight: '600' },
+
+  convBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
+  lastMsg: { fontSize: 13, color: '#64748B', flex: 1 },
+  lastMsgUnread: { color: '#0F172A', fontWeight: '700' },
+  unreadBadge: {
+    backgroundColor: '#1E5E3A', borderRadius: 10,
+    minWidth: 20, height: 20,
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 5, marginLeft: 8,
   },
-  convFooterRow: {
+  unreadTxt: { color: '#FFF', fontSize: 11, fontWeight: '800' },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingBottom: 36,
+    maxHeight: '80%',
+  },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 4,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
-  lastMsgText: {
-    fontSize: 13,
-    color: '#64748B',
-    flex: 1,
-    marginRight: 8,
-  },
-  lastMsgUnread: {
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  unreadBadge: {
-    backgroundColor: '#1E5E3A',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  unreadBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  callCard: {
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  modalSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  closeBtn: { padding: 4 },
+  userItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F8FAFC',
   },
-  callMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
+  userName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  userSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  chatActionBadge: {
+    backgroundColor: '#1E5E3A',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
   },
-  callTypeText: {
-    fontSize: 12,
-    color: '#64748B',
-  },
-  callDuration: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginLeft: 6,
-  },
-  callBackBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 24,
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginTop: 12,
-  },
-  emptySub: {
-    fontSize: 13,
-    color: '#64748B',
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
-  },
+  chatActionBadgeTxt: { color: '#FFF', fontSize: 12, fontWeight: '700' },
 });

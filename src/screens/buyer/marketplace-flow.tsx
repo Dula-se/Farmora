@@ -45,7 +45,8 @@ import { NotificationPreferencesScreen } from '../communication/notification-pre
 import { PriceAlertsScreen } from '../communication/price-alerts-screen';
 import { HelpSupportScreen } from '../communication/help-support-screen';
 import { AgroToolsScreen } from '../communication/agro-tools-screen';
-import { ChatService } from '@/services/chat-service';
+import { FirestoreChatService } from '@/services/firestore-chat-service';
+import { getStoredUser } from '@/services/api';
 
 export type BuyerScreenView =
   | 'home'
@@ -97,7 +98,20 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
   });
 
   // Communication & Call States
-  const [activeChatId, setActiveChatId] = useState<string>('c1');
+  const [activeChatMeta, setActiveChatMeta] = useState<{
+    conversationId: string;
+    otherUserId: string;
+    otherUserName: string;
+    otherUserAvatar?: string;
+    otherUserRole?: 'farmer' | 'buyer';
+    productTitle?: string;
+    productImage?: string;
+  }>({
+    conversationId: '',
+    otherUserId: '',
+    otherUserName: 'Farmer',
+    otherUserRole: 'farmer',
+  });
   const [activeCall, setActiveCall] = useState<{
     visible: boolean;
     name: string;
@@ -131,16 +145,43 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     setCurrentView('farmer-public-profile');
   };
 
-  const handleStartChatWithFarmer = async (farmerName: string, product?: ApiProduceItem) => {
-    const conv = await ChatService.getOrCreateConversation({
-      participantId: `farmer-${farmerName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-      participantName: farmerName,
-      participantRole: 'farmer',
-      productTitle: product?.title,
-      productImage: product?.images?.[0],
-    });
-    setActiveChatId(conv.id);
-    setCurrentView('chat-conversation');
+  const handleStartChatWithFarmer = async (
+    farmerIdOrName: string,
+    farmerName?: string,
+    product?: ApiProduceItem | null,
+    farmerAvatar?: string
+  ) => {
+    const user = await getStoredUser();
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in to chat with farmers.');
+      return;
+    }
+    const resolvedId = farmerName ? farmerIdOrName : `farmer-${farmerIdOrName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    const resolvedName = farmerName || farmerIdOrName;
+    try {
+      const convId = await FirestoreChatService.getOrCreateConversation({
+        currentUser: user,
+        otherUserId: resolvedId,
+        otherUserName: resolvedName,
+        otherUserRole: 'farmer',
+        otherUserAvatar: farmerAvatar || '',
+        productTitle: product?.title,
+        productImage: product?.images?.[0],
+      });
+      setActiveChatMeta({
+        conversationId: convId,
+        otherUserId: resolvedId,
+        otherUserName: resolvedName,
+        otherUserAvatar: farmerAvatar || '',
+        otherUserRole: 'farmer',
+        productTitle: product?.title,
+        productImage: product?.images?.[0],
+      });
+      setCurrentView('chat-conversation');
+    } catch (e) {
+      console.error('[Chat] handleStartChatWithFarmer error:', e);
+      Alert.alert('Error', 'Could not start conversation with this farmer.');
+    }
   };
 
   const handleTabPress = (tab: BuyerTab) => {
@@ -236,8 +277,13 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
                 `Your order for ${qty} ${prod.unit} of ${prod.title} has been routed to the farmer. Total: Rs. ${(qty * prod.pricePerUnit).toLocaleString()}`
               );
             }}
-            onChatFarmer={(fName) => {
-              handleStartChatWithFarmer(fName || 'Kusuma Bandara', selectedProduct);
+            onChatFarmer={() => {
+              handleStartChatWithFarmer(
+                String(selectedProduct.farmerId || 'farmer-1'),
+                selectedProduct.farmerName || 'Verified Farmer',
+                selectedProduct,
+                selectedProduct.farmerAvatar
+              );
             }}
             onOpenReviews={() => setCurrentView('reviews')}
             onOpenSimilar={() => setCurrentView('similar-products')}
@@ -326,8 +372,15 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
 
         {currentView === 'messages' && (
           <MessagesListScreen
-            onOpenConversation={(cId) => {
-              setActiveChatId(cId);
+            currentRole="buyer"
+            onOpenConversation={(cId, oId, oName, oAvatar, oRole) => {
+              setActiveChatMeta({
+                conversationId: cId,
+                otherUserId: oId,
+                otherUserName: oName,
+                otherUserAvatar: oAvatar,
+                otherUserRole: oRole,
+              });
               setCurrentView('chat-conversation');
             }}
             onStartCall={(name, avatar, mode) => {
@@ -338,7 +391,14 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
 
         {currentView === 'chat-conversation' && (
           <ChatConversationScreen
-            conversationId={activeChatId}
+            conversationId={activeChatMeta.conversationId}
+            otherUserId={activeChatMeta.otherUserId}
+            otherUserName={activeChatMeta.otherUserName}
+            otherUserAvatar={activeChatMeta.otherUserAvatar}
+            otherUserRole={activeChatMeta.otherUserRole}
+            productTitle={activeChatMeta.productTitle}
+            productImage={activeChatMeta.productImage}
+            currentRole="buyer"
             onBack={() => setCurrentView(activeTab === 'messages' ? 'messages' : 'home')}
             onStartAudioCall={(name, avatar) => {
               setActiveCall({ visible: true, name, avatar, mode: 'audio' });
@@ -420,8 +480,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
         {currentView === 'buyer-orders' && (
           <BuyerOrdersScreen
             onBack={() => setCurrentView('home')}
-            onChatFarmer={(farmerName) => {
-              handleStartChatWithFarmer(farmerName);
+            onChatFarmer={(farmerName, farmerId) => {
+              handleStartChatWithFarmer(farmerId || 'farmer-1', farmerName);
             }}
             onRateOrder={(order) => {
               setSelectedFarmer({ id: order.farmerId, name: order.farmerName });
@@ -525,16 +585,18 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
       {/* Schedule Live Video Inspection Modal */}
       <ScheduleInspectionModal
         visible={showScheduleModal}
-        farmerName={activeCall.name || 'Kusuma Bandara'}
+        farmerName={activeCall.name || 'Verified Farmer'}
         onClose={() => setShowScheduleModal(false)}
-        onScheduled={(details) => {
+        onScheduled={async (details) => {
           setShowScheduleModal(false);
-          ChatService.sendMessage(activeChatId, {
-            senderId: 'current-user',
-            senderName: 'You',
-            senderRole: 'buyer',
-            text: `📅 Scheduled Live Inspection for ${details.date} at ${details.time} (${details.note})`,
-          });
+          const user = await getStoredUser();
+          if (user && activeChatMeta.conversationId) {
+            await FirestoreChatService.sendMessage({
+              conversationId: activeChatMeta.conversationId,
+              currentUser: user,
+              text: `📅 Scheduled Live Inspection for ${details.date} at ${details.time} (${details.note})`,
+            });
+          }
         }}
       />
 

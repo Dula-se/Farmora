@@ -187,6 +187,38 @@ export async function pickDocumentAsBase64(options?: {
 }
 
 /**
+ * Pick an audio file (.m4a, .mp3, .wav, .aac, .ogg) and convert to base64 Data URL
+ */
+export async function pickAudioFile(): Promise<PickedMediaResult | null> {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['audio/*'],
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return null;
+    }
+
+    const asset = result.assets[0];
+    const mimeType = asset.mimeType || 'audio/m4a';
+    const dataUrl = await uriToDataUrl(asset.uri, mimeType);
+
+    return {
+      uri: asset.uri,
+      dataUrl,
+      name: asset.name || `audio_${Date.now()}.m4a`,
+      mimeType,
+      size: asset.size,
+    };
+  } catch (err: any) {
+    console.error('[MediaPicker] Audio pick error:', err);
+    Alert.alert('Error', err?.message || 'Could not pick audio file.');
+    return null;
+  }
+}
+
+/**
  * Displays a prompt to pick from Camera, Gallery, or Document
  */
 export function promptMediaSource(

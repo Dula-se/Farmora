@@ -1,6 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * chat-conversation-screen.tsx
+ *
+ * Real-time chat powered by Firebase Firestore.
+ * Voice notes: recorded with expo-audio, uploaded to Firebase Storage, played back on tap.
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Alert,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -12,22 +20,50 @@ import {
   Text,
   TextInput,
   View,
+  ActivityIndicator,
+  PermissionsAndroid,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
+import * as FileSystem from 'expo-file-system/legacy';
+import { requireOptionalNativeModule } from 'expo-modules-core';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
+
+// Safe lazy loader for expo-audio (Expo SDK 57 official audio package)
+function getExpoAudio(): typeof import('expo-audio') | null {
+  try {
+    const nativeAudio = requireOptionalNativeModule('ExpoAudio');
+    if (!nativeAudio) return null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-audio');
+  } catch {
+    return null;
+  }
+}
 import {
-  ChatService,
-  Conversation,
-  ChatMessage,
-} from '@/services/chat-service';
+  FirestoreChatService,
+  FirestoreMessage,
+  FirestoreConversation,
+  FirestoreOffer,
+} from '@/services/firestore-chat-service';
+import { getStoredUser, ApiUser } from '@/services/api';
 import {
   capturePhotoFromCamera,
   pickImageFromGallery,
+  pickAudioFile,
 } from '@/services/media-picker';
 
 interface ChatConversationScreenProps {
-  conversationId: string;
+  conversationId: string;               // Firestore conversation doc ID
+  otherUserId?: string;
+  otherUserName?: string;
+  otherUserAvatar?: string;
+  otherUserRole?: 'farmer' | 'buyer';
+  productTitle?: string;
+  productImage?: string;
   onBack: () => void;
   onStartAudioCall: (name: string, avatar: string) => void;
   onStartVideoCall: (name: string, avatar: string) => void;
@@ -38,6 +74,12 @@ interface ChatConversationScreenProps {
 
 export function ChatConversationScreen({
   conversationId,
+  otherUserId,
+  otherUserName = 'Unknown',
+  otherUserAvatar = '',
+  otherUserRole = 'farmer',
+  productTitle,
+  productImage,
   onBack,
   onStartAudioCall,
   onStartVideoCall,
@@ -45,137 +87,491 @@ export function ChatConversationScreen({
   onRateUser,
   currentRole = 'buyer',
 }: ChatConversationScreenProps) {
-  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [messages, setMessages] = useState<FirestoreMessage[]>([]);
+  const [convMeta, setConvMeta] = useState<FirestoreConversation | null>(null);
   const [inputText, setInputText] = useState('');
+  const [sending, setSending] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showActionSheet, setShowActionSheet] = useState(false);
 
-  // Counter-offer state
+  // Voice recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recordingRef = useRef<any>(null);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const micPulse = useRef(new Animated.Value(1)).current;
+  const micAnim = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Voice playback
+  const [playingMsgId, setPlayingMsgId] = useState<string | null>(null);
+  const playerRef = useRef<any>(null);
+
+  // Offer form
   const [offerQty, setOfferQty] = useState('100');
   const [offerPrice, setOfferPrice] = useState('210');
 
   const flatListRef = useRef<FlatList>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  const loadConv = async () => {
-    const c = await ChatService.getConversationById(conversationId);
-    if (c) {
-      setConversation({ ...c });
-      await ChatService.markAsRead(conversationId);
+  // ── Init ─────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    loadUserAndListen();
+    return () => {
+      unsubscribeRef.current?.();
+      stopRecording(false);
+      if (playerRef.current) {
+        try {
+          playerRef.current.pause();
+          playerRef.current.remove?.();
+        } catch {}
+      }
+    };
+  }, [conversationId]);
+
+  const loadUserAndListen = async () => {
+    const user = await getStoredUser();
+    setCurrentUser(user);
+
+    // Fetch conversation metadata (names, roles, product context)
+    try {
+      const convSnap = await getDoc(doc(db, 'conversations', conversationId));
+      if (convSnap.exists()) {
+        setConvMeta({ id: convSnap.id, ...(convSnap.data() as any) });
+      }
+    } catch (e) {
+      console.warn('[Chat] Failed to load conversation doc:', e);
+    }
+
+    // Real-time messages listener
+    const unsub = FirestoreChatService.listenToMessages(conversationId, (msgs) => {
+      setMessages(msgs);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 150);
+    });
+    unsubscribeRef.current = unsub;
+
+    // Mark as read
+    if (user) {
+      const myId = user.id || user._id || '';
+      FirestoreChatService.markConversationRead(conversationId, myId);
     }
   };
 
-  useEffect(() => {
-    loadConv();
-  }, [conversationId]);
+  // ── Audio permission ────────────────────────────────────────────────────
 
-  const handleSendTextMessage = async (textToSend?: string) => {
-    const text = textToSend || inputText.trim();
-    if (!text || !conversation) return;
+  const ensureAudioPermission = async (): Promise<boolean> => {
+    // 1. Android runtime permission request via PermissionsAndroid (directly triggers system dialog)
+    if (Platform.OS === 'android') {
+      try {
+        const hasPerm = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+        );
+        if (hasPerm) return true;
 
-    setInputText('');
-    await ChatService.sendMessage(conversation.id, {
-      senderId: 'current-user',
-      senderName: currentRole === 'buyer' ? 'Buyer' : 'Farmer',
-      senderRole: currentRole,
-      text,
-    });
-    await loadConv();
-    flatListRef.current?.scrollToEnd({ animated: true });
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message: 'Farmora needs microphone access so you can send voice notes in chat.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+          }
+        );
+
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          return true;
+        }
+
+        if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          Alert.alert(
+            'Microphone Permission Required',
+            'Microphone access is currently disabled for Farmora. Tap Open Settings to enable it.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+          return false;
+        }
+
+        return false;
+      } catch (err) {
+        console.warn('[Audio] PermissionsAndroid error:', err);
+      }
+    }
+
+    // 2. Fallback / iOS check via expo-audio
+    const Audio = getExpoAudio();
+    if (Audio?.requestRecordingPermissionsAsync) {
+      try {
+        const { status, canAskAgain } = await Audio.requestRecordingPermissionsAsync();
+        if (status === 'granted') return true;
+
+        if (!canAskAgain) {
+          Alert.alert(
+            'Microphone Permission Required',
+            'Microphone access is currently disabled for Farmora. Tap Open Settings to enable it.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+          return false;
+        }
+
+        return false;
+      } catch (e) {
+        console.warn('[Audio] Permission error:', e);
+        return false;
+      }
+    }
+
+    return false;
   };
+
+  // ── Recording ───────────────────────────────────────────────────────────
+
+  const startMicPulse = () => {
+    micAnim.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(micPulse, { toValue: 1.4, duration: 500, useNativeDriver: true }),
+        Animated.timing(micPulse, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ])
+    );
+    micAnim.current.start();
+  };
+
+  const stopMicPulse = () => {
+    micAnim.current?.stop();
+    micPulse.setValue(1);
+  };
+
+  const handleStartRecording = async () => {
+    const Audio = getExpoAudio();
+    if (!Audio) {
+      Alert.alert(
+        'Voice Recording',
+        'Direct microphone recording requires rebuilding the APK ("npx expo run:android") with the audio module.\n\nWould you like to attach an audio file or voice recording from your device instead?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Attach Audio Note', onPress: () => handlePickAndSendAudio() },
+        ]
+      );
+      return;
+    }
+
+    const ok = await ensureAudioPermission();
+    if (!ok) return;
+
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const AudioModule = require('expo-audio/build/AudioModule').default;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createRecordingOptions } = require('expo-audio/build/utils/options');
+      const options = createRecordingOptions(Audio.RecordingPresets.HIGH_QUALITY);
+      const recorder = new AudioModule.AudioRecorder(options);
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      recordingRef.current = recorder;
+      setIsRecording(true);
+      setRecordSeconds(0);
+      startMicPulse();
+
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('[Voice] Start recording error:', err);
+      Alert.alert('Recording Failed', 'Could not start recording. You can also attach an audio note directly.');
+    }
+  };
+
+  const stopRecording = async (send: boolean) => {
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    stopMicPulse();
+
+    const duration = recordSeconds;
+    setIsRecording(false);
+    setRecordSeconds(0);
+
+    const recorder = recordingRef.current;
+    recordingRef.current = null;
+
+    if (!recorder) return;
+
+    try {
+      await recorder.stop();
+      const Audio = getExpoAudio();
+      if (Audio) {
+        await Audio.setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+      }
+
+      if (!send || duration < 1 || !currentUser) return;
+
+      const uri = recorder.uri;
+      if (!uri) return;
+
+      setSending(true);
+      const waveform = Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 24));
+
+      await FirestoreChatService.sendVoiceNote({
+        conversationId,
+        currentUser,
+        audioUri: uri,
+        durationSeconds: duration,
+        waveform,
+      });
+    } catch (err) {
+      console.error('[Voice] Stop/send error:', err);
+      Alert.alert('Error', 'Could not send voice note.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Audio Attachment Fallback (Always Works) ─────────────────────────────
+
+  const handlePickAndSendAudio = async () => {
+    try {
+      const picked = await pickAudioFile();
+      if (!picked || !picked.uri || !currentUser) return;
+
+      setSending(true);
+      const waveform = Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 24));
+      const estimatedDuration = Math.max(3, Math.min(30, Math.round((picked.size || 60000) / 16000)));
+
+      await FirestoreChatService.sendVoiceNote({
+        conversationId,
+        currentUser,
+        audioUri: picked.uri,
+        durationSeconds: estimatedDuration,
+        waveform,
+      });
+    } catch (err: any) {
+      console.error('[Voice] Attach audio error:', err);
+      Alert.alert('Error', err?.message || 'Could not attach audio note.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Playback ─────────────────────────────────────────────────────────────
+
+  const handlePlayVoice = async (msg: FirestoreMessage) => {
+    if (!msg.voiceUrl && !msg.voiceBase64) {
+      Alert.alert('Not available', 'Voice note audio is not available.');
+      return;
+    }
+
+    const Audio = getExpoAudio();
+    if (!Audio) {
+      Alert.alert(
+        'Audio Playback',
+        'Audio playback requires rebuilding the Android app ("npx expo run:android") with the new audio module.'
+      );
+      return;
+    }
+
+    // Stop current playback if any
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+        playerRef.current.remove?.();
+      } catch {}
+      playerRef.current = null;
+    }
+
+    // If tapping the same message that is playing, stop it
+    if (playingMsgId === msg.id) {
+      setPlayingMsgId(null);
+      return;
+    }
+
+    try {
+      setPlayingMsgId(msg.id);
+      await Audio.setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldRouteThroughEarpiece: false, // Ensures loudspeaker playback
+      });
+
+      let playUri = msg.voiceUrl || '';
+
+      // If base64 audio exists, save to local cache for 100% reliable local playback
+      if (msg.voiceBase64) {
+        try {
+          const cachePath = `${FileSystem.cacheDirectory}vn_${msg.id}.m4a`;
+          const info = await FileSystem.getInfoAsync(cachePath);
+          if (!info.exists) {
+            await FileSystem.writeAsStringAsync(cachePath, msg.voiceBase64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+          }
+          playUri = cachePath;
+        } catch (fsErr) {
+          console.warn('[Voice] Local cache write failed, falling back to voiceUrl:', fsErr);
+        }
+      }
+
+      if (!playUri) {
+        setPlayingMsgId(null);
+        Alert.alert('Error', 'No playable audio URI found');
+        return;
+      }
+
+      const player = Audio.createAudioPlayer(playUri);
+      playerRef.current = player;
+      player.play();
+
+      player.addListener('playbackStatusUpdate', (status: any) => {
+        if (
+          status.playbackState === 'ended' ||
+          (status.isLoaded && !status.playing && status.currentTime >= (status.duration - 0.2))
+        ) {
+          setPlayingMsgId(null);
+          try {
+            player.remove?.();
+          } catch {}
+          if (playerRef.current === player) {
+            playerRef.current = null;
+          }
+        }
+      });
+    } catch (err) {
+      console.error('[Voice] Playback error:', err);
+      setPlayingMsgId(null);
+      Alert.alert('Playback Error', 'Could not play voice note.');
+    }
+  };
+
+  // ── Send text ─────────────────────────────────────────────────────────────
+
+  const handleSendText = async (text?: string) => {
+    const msg = text || inputText.trim();
+    if (!msg || !currentUser) return;
+    setInputText('');
+    setSending(true);
+    try {
+      await FirestoreChatService.sendMessage({
+        conversationId,
+        currentUser,
+        text: msg,
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Send photo ────────────────────────────────────────────────────────────
 
   const handleSendPhoto = async (source: 'camera' | 'gallery') => {
     setShowActionSheet(false);
+    if (!currentUser) return;
     const result =
       source === 'camera'
-        ? await capturePhotoFromCamera({ quality: 0.65 })
-        : await pickImageFromGallery({ quality: 0.65 });
+        ? await capturePhotoFromCamera({ quality: 0.5 })
+        : await pickImageFromGallery({ quality: 0.5 });
 
-    if (result && conversation) {
-      await ChatService.sendMessage(conversation.id, {
-        senderId: 'current-user',
-        senderName: 'You',
-        senderRole: currentRole,
-        text: 'Sent a photo of produce',
-        imageUri: result.dataUrl,
-      });
-      await loadConv();
-      flatListRef.current?.scrollToEnd({ animated: true });
+    if (result) {
+      setSending(true);
+      try {
+        await FirestoreChatService.sendMessage({
+          conversationId,
+          currentUser,
+          text: '📷 Photo',
+          imageUri: result.dataUrl,
+        });
+      } finally {
+        setSending(false);
+      }
     }
   };
 
-  const handleSendVoiceNote = async () => {
-    if (!conversation) return;
-    await ChatService.sendMessage(conversation.id, {
-      senderId: 'current-user',
-      senderName: 'You',
-      senderRole: currentRole,
-      text: 'Voice note (0:18)',
-      isVoiceNote: true,
-      voiceDuration: '0:18',
-    });
-    await loadConv();
-    flatListRef.current?.scrollToEnd({ animated: true });
-  };
+  // ── Send offer ────────────────────────────────────────────────────────────
 
-  const handleSendCounterOffer = async () => {
-    if (!conversation) return;
+  const handleSendOffer = async () => {
+    if (!currentUser) return;
     const qty = parseFloat(offerQty) || 50;
     const price = parseFloat(offerPrice) || 200;
     const total = qty * price;
 
-    await ChatService.sendMessage(conversation.id, {
-      senderId: 'current-user',
-      senderName: 'You',
-      senderRole: currentRole,
-      text: `Proposed counter-offer for ${qty} kg @ Rs. ${price}/kg`,
-      offer: {
-        id: `off_${Date.now()}`,
-        productTitle: conversation.productTitle || 'Produce',
-        quantity: qty,
-        unit: 'kg',
-        pricePerUnit: price,
-        totalAmount: total,
-        status: 'pending',
-      },
-    });
+    const offer: FirestoreOffer = {
+      id: `off_${Date.now()}`,
+      productTitle: productTitle || convMeta?.productTitle || 'Produce',
+      quantity: qty,
+      unit: 'kg',
+      pricePerUnit: price,
+      totalAmount: total,
+      status: 'pending',
+      counterBy: currentRole,
+    };
 
-    setShowOfferModal(false);
-    await loadConv();
-    flatListRef.current?.scrollToEnd({ animated: true });
+    setSending(true);
+    try {
+      await FirestoreChatService.sendMessage({
+        conversationId,
+        currentUser,
+        text: `Proposed offer: ${qty} kg @ Rs. ${price}/kg`,
+        offer,
+      });
+      setShowOfferModal(false);
+    } finally {
+      setSending(false);
+    }
   };
 
+  // ── Accept / Decline offer ────────────────────────────────────────────────
+
   const handleAcceptOffer = async (msgId: string) => {
-    if (!conversation) return;
-    await ChatService.updateOfferStatus(conversation.id, msgId, 'accepted');
-    Alert.alert(
-      'Offer Accepted! 🎉',
-      'The price offer has been agreed. You can now proceed to payment and delivery confirmation.'
-    );
-    await loadConv();
+    await FirestoreChatService.updateOfferStatus(conversationId, msgId, 'accepted');
+    handleSendText('✅ Offer accepted! Let\'s confirm the order.');
+    Alert.alert('Offer Accepted! 🎉', 'The price offer has been agreed. Proceed to confirm your order.');
   };
 
   const handleDeclineOffer = async (msgId: string) => {
-    if (!conversation) return;
-    await ChatService.updateOfferStatus(conversation.id, msgId, 'declined');
-    Alert.alert('Offer Declined', 'The proposed price offer was declined.');
-    await loadConv();
+    await FirestoreChatService.updateOfferStatus(conversationId, msgId, 'declined');
+    handleSendText('Sorry, I cannot accept this offer.');
   };
 
-  if (!conversation) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingBox}>
-          <Text style={{ color: '#64748B' }}>Loading conversation...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  const myId = currentUser?.id || currentUser?._id || '';
+  const fmtTimer = (s: number) =>
+    `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+
+  const actualOtherUserId =
+    otherUserId ||
+    (convMeta?.participants?.find((p) => p !== myId) || '');
+  const participantAvatar =
+    (actualOtherUserId && convMeta?.participantAvatars?.[actualOtherUserId]) ||
+    otherUserAvatar ||
+    '';
+  const participantName =
+    (actualOtherUserId && convMeta?.participantNames?.[actualOtherUserId]) ||
+    otherUserName ||
+    'User';
+  const participantRole =
+    (actualOtherUserId && convMeta?.participantRoles?.[actualOtherUserId]) ||
+    otherUserRole ||
+    'farmer';
+  const pinnedProduct = productTitle || convMeta?.productTitle;
+  const pinnedImage = productImage || convMeta?.productImage;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Top Header */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
           <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
@@ -184,394 +580,343 @@ export function ChatConversationScreen({
         </Pressable>
 
         <View style={styles.headerParticipant}>
-          <View style={styles.headerAvatarWrap}>
-            <Image source={{ uri: conversation.participantAvatar }} style={styles.headerAvatar} contentFit="cover" />
-            {conversation.isOnline && <View style={styles.headerOnlineDot} />}
+          <View style={styles.avatarWrap}>
+            {participantAvatar ? (
+              <Image source={{ uri: participantAvatar }} style={styles.headerAvatar} contentFit="cover" />
+            ) : (
+              <View style={[styles.headerAvatar, styles.avatarPlaceholder]}>
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 16 }}>
+                  {participantName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={{ flex: 1, marginLeft: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.headerName} numberOfLines={1}>
-                {conversation.participantName}
-              </Text>
-              {conversation.verified && (
-                <View style={styles.headerTick}>
-                  <Text style={styles.headerTickText}>✓</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.headerStatusText}>
-              {conversation.isOnline ? 'Active now' : 'Verified Farmer'}
+            <Text style={styles.headerName} numberOfLines={1}>{participantName}</Text>
+            <Text style={styles.headerSub}>
+              {otherUserRole === 'farmer' ? '🌾 Verified Farmer' : '🛒 Buyer'}
             </Text>
           </View>
         </View>
 
-        {/* Action icons: Audio Call, Video Call, Rate */}
-        <View style={styles.headerIconsRow}>
-          <Pressable
-            style={styles.headerIconBtn}
-            onPress={() =>
-              onStartAudioCall(conversation.participantName, conversation.participantAvatar)
-            }>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.headerIconBtn} onPress={() => onStartAudioCall(participantName, participantAvatar)}>
             <Text style={{ fontSize: 17 }}>📞</Text>
           </Pressable>
-
-          <Pressable
-            style={styles.headerIconBtn}
-            onPress={() =>
-              onStartVideoCall(conversation.participantName, conversation.participantAvatar)
-            }>
+          <Pressable style={styles.headerIconBtn} onPress={() => onStartVideoCall(participantName, participantAvatar)}>
             <Text style={{ fontSize: 17 }}>📹</Text>
           </Pressable>
-
-          {onRateUser && (
-            <Pressable
-              style={styles.headerIconBtn}
-              onPress={() =>
-                onRateUser(
-                  conversation.participantId,
-                  conversation.participantName,
-                  conversation.participantAvatar,
-                  conversation.participantRole
-                )
-              }>
+          {onRateUser && otherUserId && (
+            <Pressable style={styles.headerIconBtn} onPress={() => onRateUser(otherUserId, participantName, participantAvatar, otherUserRole)}>
               <Text style={{ fontSize: 17 }}>⭐</Text>
             </Pressable>
           )}
         </View>
       </View>
 
-      {/* Pinned Produce Reference Bar */}
-      {conversation.productTitle && (
-        <View style={styles.producePinnedBar}>
-          {conversation.productImage && (
-            <Image source={{ uri: conversation.productImage }} style={styles.pinnedThumb} contentFit="cover" />
+      {/* ── Pinned product bar ──────────────────────────────────────────────── */}
+      {pinnedProduct && (
+        <View style={styles.pinnedBar}>
+          {pinnedImage && (
+            <Image source={{ uri: pinnedImage }} style={styles.pinnedThumb} contentFit="cover" />
           )}
           <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={styles.pinnedTitle} numberOfLines={1}>
-              {conversation.productTitle}
-            </Text>
-            <Text style={styles.pinnedPrice}>Direct Farm Price • Grade A</Text>
+            <Text style={styles.pinnedTitle} numberOfLines={1}>{pinnedProduct}</Text>
+            <Text style={styles.pinnedSub}>Direct Farm Price • Grade A</Text>
           </View>
-          <Pressable
-            style={styles.pinnedOfferBtn}
-            onPress={() => setShowOfferModal(true)}>
-            <Text style={styles.pinnedOfferBtnText}>Make Offer</Text>
+          <Pressable style={styles.offerPillBtn} onPress={() => setShowOfferModal(true)}>
+            <Text style={styles.offerPillText}>Make Offer</Text>
           </Pressable>
         </View>
       )}
 
-      {/* Quick Prompt Pills */}
-      <View style={styles.quickPromptsWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickPromptsContent}>
-          <Pressable
-            style={styles.promptPill}
-            onPress={() => handleSendTextMessage('Is this harvest available for pickup this week?')}>
-            <Text style={styles.promptPillText}>🌾 Available this week?</Text>
-          </Pressable>
-          <Pressable
-            style={styles.promptPill}
-            onPress={() => handleSendTextMessage('Can you provide a discount for orders over 100 kg?')}>
-            <Text style={styles.promptPillText}>💰 Bulk discount query</Text>
-          </Pressable>
-          <Pressable
-            style={styles.promptPill}
-            onPress={() => {
-              if (onRequestInspection) onRequestInspection();
-              else setShowOfferModal(true);
-            }}>
-            <Text style={styles.promptPillText}>📹 Request live inspection</Text>
-          </Pressable>
-          <Pressable
-            style={styles.promptPill}
-            onPress={() => handleSendTextMessage('What certifications do you hold for this produce?')}>
-            <Text style={styles.promptPillText}>📜 SL-GAP / Organic info</Text>
-          </Pressable>
+      {/* ── Quick prompts ───────────────────────────────────────────────────── */}
+      <View style={styles.promptsWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptsContent}>
+          {[
+            { label: '🌾 Available this week?', text: 'Is this harvest available for pickup this week?' },
+            { label: '💰 Bulk discount?', text: 'Can you give a bulk discount for orders over 100 kg?' },
+            { label: '📜 Certifications?', text: 'What certifications do you hold for this produce?' },
+            { label: '🚚 Delivery available?', text: 'Do you offer delivery to Colombo?' },
+          ].map((p) => (
+            <Pressable key={p.label} style={styles.promptPill} onPress={() => handleSendText(p.text)}>
+              <Text style={styles.promptPillText}>{p.label}</Text>
+            </Pressable>
+          ))}
         </ScrollView>
       </View>
 
-      {/* Message Stream */}
+      {/* ── Messages ────────────────────────────────────────────────────────── */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-        <FlatList
-          ref={flatListRef}
-          data={conversation.messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messageList}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
-            const isMe = item.senderId === 'current-user' || item.senderName === 'You';
-            return (
-              <View style={[styles.msgRow, isMe ? styles.msgRowRight : styles.msgRowLeft]}>
-                {!isMe && (
-                  <Image
-                    source={{ uri: conversation.participantAvatar }}
-                    style={styles.msgAvatar}
-                    contentFit="cover"
-                  />
-                )}
 
-                <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
-                  {/* Photo Attachment */}
-                  {item.imageUri && (
-                    <View style={styles.imageAttachWrap}>
-                      <Image source={{ uri: item.imageUri }} style={styles.imageAttach} contentFit="cover" />
-                    </View>
+        {messages.length === 0 ? (
+          <View style={styles.emptyChatBox}>
+            <Text style={{ fontSize: 40 }}>💬</Text>
+            <Text style={styles.emptyChatTitle}>Start the conversation</Text>
+            <Text style={styles.emptyChatSub}>Say hello or make a price offer to begin!</Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.msgList}
+            showsVerticalScrollIndicator={false}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            renderItem={({ item }) => {
+              const isMe = item.senderId === myId;
+              const isPlayingThis = playingMsgId === item.id;
+
+              return (
+                <View style={[styles.msgRow, isMe ? styles.msgRowRight : styles.msgRowLeft]}>
+                  {!isMe && (
+                    participantAvatar ? (
+                      <Image source={{ uri: participantAvatar }} style={styles.msgAvatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.msgAvatar, styles.avatarPlaceholder]}>
+                        <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700' }}>
+                          {participantName.charAt(0)}
+                        </Text>
+                      </View>
+                    )
                   )}
 
-                  {/* Voice Note Bubble */}
-                  {item.isVoiceNote ? (
-                    <View style={styles.voiceNoteWrap}>
-                      <View style={styles.voicePlayCircle}>
-                        <Text style={{ fontSize: 13, color: '#FFFFFF' }}>▶</Text>
+                  <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
+
+                    {/* Photo */}
+                    {item.imageUri && item.imageUri !== '📷 Photo' && (
+                      <View style={styles.imgWrap}>
+                        <Image source={{ uri: item.imageUri }} style={styles.imgAttach} contentFit="cover" />
                       </View>
-                      <View style={styles.voiceWaveforms}>
-                        {[16, 24, 12, 30, 20, 28, 14, 22, 10, 26, 18].map((h, i) => (
-                          <View
-                            key={i}
-                            style={[
-                              styles.waveformBar,
-                              { height: h, backgroundColor: isMe ? '#FFFFFF' : '#1E5E3A' },
-                            ]}
-                          />
-                        ))}
-                      </View>
-                      <Text style={[styles.voiceDuration, isMe ? { color: '#E2E8F0' } : { color: '#64748B' }]}>
-                        {item.voiceDuration || '0:18'}
+                    )}
+
+                    {/* Voice note */}
+                    {item.isVoiceNote && (
+                      <Pressable style={styles.voiceRow} onPress={() => handlePlayVoice(item)}>
+                        <View style={[styles.playCircle, isMe && styles.playCircleMe]}>
+                          {isPlayingThis ? (
+                            <View style={styles.pauseIcon}>
+                              <View style={styles.pauseBar} />
+                              <View style={styles.pauseBar} />
+                            </View>
+                          ) : (
+                            <Text style={{ fontSize: 11, color: '#FFF' }}>▶</Text>
+                          )}
+                        </View>
+                        <View style={styles.waveWrap}>
+                          {(item.voiceWaveform || Array(15).fill(14)).map((h: number, i: number) => (
+                            <Animated.View
+                              key={i}
+                              style={[
+                                styles.wavebar,
+                                {
+                                  height: isPlayingThis ? h * (0.5 + Math.random() * 0.5) : h,
+                                  backgroundColor: isMe
+                                    ? (isPlayingThis ? '#A7F3D0' : 'rgba(255,255,255,0.8)')
+                                    : (isPlayingThis ? '#1E5E3A' : '#64748B'),
+                                },
+                              ]}
+                            />
+                          ))}
+                        </View>
+                        <Text style={[styles.voiceDur, isMe ? { color: '#DCFCE7' } : { color: '#64748B' }]}>
+                          {item.voiceDuration || '0:00'}
+                        </Text>
+                      </Pressable>
+                    )}
+
+                    {/* Text */}
+                    {!item.isVoiceNote && !item.offer && item.text && (
+                      <Text style={[styles.msgText, isMe ? styles.msgTextMe : styles.msgTextThem]}>
+                        {item.text}
                       </Text>
-                    </View>
-                  ) : (
-                    /* Regular Text */
-                    <Text style={[styles.msgText, isMe ? styles.msgTextMe : styles.msgTextThem]}>
-                      {item.text}
+                    )}
+
+                    {/* Offer card */}
+                    {item.offer && (
+                      <View style={styles.offerCard}>
+                        <View style={styles.offerHeader}>
+                          <Text style={{ fontSize: 20 }}>🤝</Text>
+                          <Text style={styles.offerCardTitle}>Price Offer Proposal</Text>
+                        </View>
+                        <Text style={styles.offerProduct}>{item.offer.productTitle}</Text>
+                        {item.text ? <Text style={styles.offerNote}>{item.text}</Text> : null}
+                        <View style={styles.offerRow}>
+                          <View style={styles.offerChip}>
+                            <Text style={styles.offerChipLabel}>Quantity</Text>
+                            <Text style={styles.offerChipVal}>{item.offer.quantity} {item.offer.unit}</Text>
+                          </View>
+                          <View style={styles.offerChip}>
+                            <Text style={styles.offerChipLabel}>Rate</Text>
+                            <Text style={styles.offerChipVal}>Rs. {item.offer.pricePerUnit}/{item.offer.unit}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.offerTotalRow}>
+                          <Text style={styles.offerTotalLabel}>Total:</Text>
+                          <Text style={styles.offerTotalVal}>Rs. {item.offer.totalAmount.toLocaleString()}</Text>
+                        </View>
+
+                        {item.offer.status === 'pending' ? (
+                          !isMe ? (
+                            <View style={styles.offerBtns}>
+                              <Pressable style={styles.offerAcceptBtn} onPress={() => handleAcceptOffer(item.id)}>
+                                <Text style={styles.offerAcceptTxt}>✓ Accept</Text>
+                              </Pressable>
+                              <Pressable style={styles.offerDeclineBtn} onPress={() => handleDeclineOffer(item.id)}>
+                                <Text style={styles.offerDeclineTxt}>✕ Decline</Text>
+                              </Pressable>
+                              <Pressable style={styles.offerCounterBtn} onPress={() => setShowOfferModal(true)}>
+                                <Text style={styles.offerCounterTxt}>Counter</Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            <View style={styles.offerPendingBox}>
+                              <Text style={styles.offerPendingTxt}>⏳ Awaiting response...</Text>
+                            </View>
+                          )
+                        ) : (
+                          <View style={[styles.offerStatusBox,
+                            item.offer.status === 'accepted' ? styles.offerStatusAccepted : styles.offerStatusDeclined]}>
+                            <Text style={styles.offerStatusTxt}>
+                              {item.offer.status === 'accepted' ? '✓ Offer Accepted' : '✕ Offer Declined'}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* Timestamp */}
+                    <Text style={[styles.msgTime, isMe ? styles.msgTimeMe : styles.msgTimeThem]}>
+                      {item.timestamp}{isMe ? '  ✓✓' : ''}
                     </Text>
-                  )}
-
-                  {/* Negotiation / Counter-Offer Card */}
-                  {item.offer && (
-                    <View style={styles.offerCard}>
-                      <View style={styles.offerCardHeader}>
-                        <Text style={styles.offerBadgeEmoji}>🤝</Text>
-                        <Text style={styles.offerCardTitle}>Price Offer Proposal</Text>
-                      </View>
-                      <Text style={styles.offerProduct}>{item.offer.productTitle}</Text>
-                      <View style={styles.offerDetailsRow}>
-                        <Text style={styles.offerDetailText}>
-                          Qty: <Text style={{ fontWeight: '700' }}>{item.offer.quantity} {item.offer.unit}</Text>
-                        </Text>
-                        <Text style={styles.offerDetailText}>
-                          Rate: <Text style={{ fontWeight: '700' }}>Rs. {item.offer.pricePerUnit} /{item.offer.unit}</Text>
-                        </Text>
-                      </View>
-                      <View style={styles.offerTotalRow}>
-                        <Text style={styles.offerTotalLabel}>Total Amount:</Text>
-                        <Text style={styles.offerTotalVal}>Rs. {item.offer.totalAmount.toLocaleString()}</Text>
-                      </View>
-
-                      {/* Status & Action buttons */}
-                      {item.offer.status === 'pending' ? (
-                        <View style={styles.offerActionsRow}>
-                          <Pressable
-                            style={styles.offerAcceptBtn}
-                            onPress={() => handleAcceptOffer(item.id)}>
-                            <Text style={styles.offerAcceptBtnText}>✓ Accept</Text>
-                          </Pressable>
-                          <Pressable
-                            style={styles.offerDeclineBtn}
-                            onPress={() => handleDeclineOffer(item.id)}>
-                            <Text style={styles.offerDeclineBtnText}>✕ Decline</Text>
-                          </Pressable>
-                          <Pressable
-                            style={styles.offerCounterBtn}
-                            onPress={() => setShowOfferModal(true)}>
-                            <Text style={styles.offerCounterBtnText}>Counter</Text>
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <View
-                          style={[
-                            styles.offerStatusBadge,
-                            item.offer.status === 'accepted'
-                              ? styles.offerAcceptedBadge
-                              : styles.offerDeclinedBadge,
-                          ]}>
-                          <Text style={styles.offerStatusBadgeText}>
-                            {item.offer.status === 'accepted' ? '✓ Offer Agreed & Accepted' : '✕ Offer Declined'}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  )}
-
-                  <Text style={[styles.msgTime, isMe ? styles.msgTimeMe : styles.msgTimeThem]}>
-                    {item.timestamp}
-                  </Text>
+                  </View>
                 </View>
-              </View>
-            );
-          }}
-        />
-
-        {/* Bottom Input Controls */}
-        <View style={styles.inputBar}>
-          <Pressable
-            style={styles.inputActionBtn}
-            onPress={() => setShowActionSheet(true)}>
-            <Text style={{ fontSize: 20, color: '#1E5E3A', fontWeight: '800' }}>+</Text>
-          </Pressable>
-
-          <Pressable
-            style={styles.inputActionBtn}
-            onPress={() => handleSendPhoto('camera')}>
-            <Text style={{ fontSize: 18 }}>📷</Text>
-          </Pressable>
-
-          <TextInput
-            style={styles.textInput}
-            placeholder="Type a message or offer..."
-            placeholderTextColor="#94A3B8"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
+              );
+            }}
           />
+        )}
 
-          {inputText.trim().length > 0 ? (
-            <Pressable
-              style={styles.sendBtn}
-              onPress={() => handleSendTextMessage()}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                <Path d="M22 2L11 13" />
-                <Path d="M22 2l-7 20-4-9-9-4 20-7z" />
-              </Svg>
+        {/* ── Voice recording bar ─────────────────────────────────────────── */}
+        {isRecording ? (
+          <View style={styles.recordBar}>
+            <Pressable style={styles.cancelRecordBtn} onPress={() => stopRecording(false)}>
+              <Text style={styles.cancelRecordTxt}>✕ Cancel</Text>
             </Pressable>
-          ) : (
-            <Pressable
-              style={styles.micBtn}
-              onPress={handleSendVoiceNote}>
-              <Text style={{ fontSize: 18 }}>🎙️</Text>
+            <View style={styles.recordCenter}>
+              <Animated.View style={[styles.recordDot, { transform: [{ scale: micPulse }] }]} />
+              <Text style={styles.recordTimer}>{fmtTimer(recordSeconds)}</Text>
+              <Text style={styles.recordHint}>Recording...</Text>
+            </View>
+            <Pressable style={styles.sendRecordBtn} onPress={() => stopRecording(true)}>
+              <Text style={styles.sendRecordTxt}>Send ➤</Text>
             </Pressable>
-          )}
-        </View>
+          </View>
+        ) : (
+          /* ── Input bar ─────────────────────────────────────────────────── */
+          <View style={styles.inputBar}>
+            <Pressable style={styles.inputIconBtn} onPress={() => setShowActionSheet(true)}>
+              <Text style={{ fontSize: 20, color: '#1E5E3A', fontWeight: '800' }}>+</Text>
+            </Pressable>
+            <Pressable style={styles.inputIconBtn} onPress={() => handleSendPhoto('camera')}>
+              <Text style={{ fontSize: 18 }}>📷</Text>
+            </Pressable>
+
+            <TextInput
+              style={styles.textInput}
+              placeholder="Type a message..."
+              placeholderTextColor="#94A3B8"
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+            />
+
+            {sending ? (
+              <ActivityIndicator size="small" color="#1E5E3A" style={{ width: 38 }} />
+            ) : inputText.trim().length > 0 ? (
+              <Pressable style={styles.sendBtn} onPress={() => handleSendText()}>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M22 2L11 13" />
+                  <Path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                </Svg>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.micBtn} onPress={handleStartRecording}>
+                <Text style={{ fontSize: 18 }}>🎙️</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
       </KeyboardAvoidingView>
 
-      {/* Action Sheet Modal */}
+      {/* ── Action Sheet ────────────────────────────────────────────────────── */}
       <Modal visible={showActionSheet} transparent animationType="slide">
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowActionSheet(false)}>
-          <View style={styles.actionSheetContent}>
-            <Text style={styles.actionSheetTitle}>Share & Negotiate</Text>
+        <Pressable style={styles.overlay} onPress={() => setShowActionSheet(false)}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Share & Negotiate</Text>
 
-            <Pressable
-              style={styles.actionSheetItem}
-              onPress={() => {
-                setShowActionSheet(false);
-                setShowOfferModal(true);
-              }}>
-              <Text style={styles.actionSheetIcon}>💰</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionSheetItemTitle}>Make Price Offer</Text>
-                <Text style={styles.actionSheetItemSub}>Negotiate direct bulk farm gate price</Text>
-              </View>
-            </Pressable>
+            {[
+              { icon: '💰', title: 'Make Price Offer', sub: 'Negotiate direct bulk farm gate price', action: () => { setShowActionSheet(false); setShowOfferModal(true); } },
+              { icon: '🎙️', title: 'Attach Audio / Voice Note', sub: 'Send audio note file from device', action: () => { setShowActionSheet(false); handlePickAndSendAudio(); } },
+              { icon: '📹', title: 'Request Live Inspection', sub: 'Inspect crop quality & field freshness', action: () => { setShowActionSheet(false); onRequestInspection ? onRequestInspection() : handleSendText('I would like to request a live video inspection of the produce.'); } },
+              { icon: '🖼️', title: 'Send Photo from Gallery', sub: 'Attach produce photos', action: () => handleSendPhoto('gallery') },
+              { icon: '📍', title: 'Share Farm Location', sub: 'Send coordinates for collection', action: () => { setShowActionSheet(false); handleSendText('📍 Shared Location: Please check my farm coordinates on the map.'); } },
+            ].map((item) => (
+              <Pressable key={item.title} style={styles.sheetItem} onPress={item.action}>
+                <Text style={styles.sheetIcon}>{item.icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetItemTitle}>{item.title}</Text>
+                  <Text style={styles.sheetItemSub}>{item.sub}</Text>
+                </View>
+              </Pressable>
+            ))}
 
-            <Pressable
-              style={styles.actionSheetItem}
-              onPress={() => {
-                setShowActionSheet(false);
-                if (onRequestInspection) onRequestInspection();
-                else Alert.alert('Farm Visit', 'Inspection request sent to farmer.');
-              }}>
-              <Text style={styles.actionSheetIcon}>📹</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionSheetItemTitle}>Request Live Video Inspection</Text>
-                <Text style={styles.actionSheetItemSub}>Inspect crop quality, sorting & field freshness</Text>
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={styles.actionSheetItem}
-              onPress={() => handleSendPhoto('gallery')}>
-              <Text style={styles.actionSheetIcon}>🖼️</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionSheetItemTitle}>Send Produce Photo</Text>
-                <Text style={styles.actionSheetItemSub}>Attach photos from your camera roll</Text>
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={styles.actionSheetItem}
-              onPress={() => {
-                setShowActionSheet(false);
-                handleSendTextMessage('📍 Shared Location: Welimada Agri Hub, Central Province (6.9497, 80.7891)');
-              }}>
-              <Text style={styles.actionSheetIcon}>📍</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionSheetItemTitle}>Share Delivery / Farm Location</Text>
-                <Text style={styles.actionSheetItemSub}>Send coordinates for collection or logistics</Text>
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={styles.actionSheetCancel}
-              onPress={() => setShowActionSheet(false)}>
-              <Text style={styles.actionSheetCancelText}>Cancel</Text>
+            <Pressable style={styles.sheetCancel} onPress={() => setShowActionSheet(false)}>
+              <Text style={styles.sheetCancelTxt}>Cancel</Text>
             </Pressable>
           </View>
         </Pressable>
       </Modal>
 
-      {/* Make / Counter Offer Modal */}
+      {/* ── Offer Modal ──────────────────────────────────────────────────────── */}
       <Modal visible={showOfferModal} transparent animationType="slide">
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowOfferModal(false)}>
-          <View style={styles.offerModalContent}>
+        <Pressable style={styles.overlay} onPress={() => setShowOfferModal(false)}>
+          <View style={styles.offerModal}>
             <View style={styles.offerModalHeader}>
               <Text style={styles.offerModalTitle}>Negotiate Price Offer</Text>
               <Pressable onPress={() => setShowOfferModal(false)} hitSlop={8}>
                 <Text style={{ fontSize: 18, color: '#94A3B8' }}>✕</Text>
               </Pressable>
             </View>
-
             <Text style={styles.offerModalSub}>
-              Propose a custom volume and unit rate directly to {conversation.participantName}.
+              Propose a custom volume and unit rate directly to {participantName}.
             </Text>
 
-            <View style={styles.offerInputsRow}>
+            <View style={styles.offerInputRow}>
               <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.inputFieldLabel}>Quantity (kg)</Text>
-                <TextInput
-                  style={styles.offerInput}
-                  keyboardType="numeric"
-                  value={offerQty}
-                  onChangeText={setOfferQty}
-                />
+                <Text style={styles.fieldLabel}>Quantity (kg)</Text>
+                <TextInput style={styles.offerInput} keyboardType="numeric" value={offerQty} onChangeText={setOfferQty} />
               </View>
               <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.inputFieldLabel}>Price / kg (LKR)</Text>
-                <TextInput
-                  style={styles.offerInput}
-                  keyboardType="numeric"
-                  value={offerPrice}
-                  onChangeText={setOfferPrice}
-                />
+                <Text style={styles.fieldLabel}>Price / kg (LKR)</Text>
+                <TextInput style={styles.offerInput} keyboardType="numeric" value={offerPrice} onChangeText={setOfferPrice} />
               </View>
             </View>
 
-            {/* Calculated Total Bar */}
-            <View style={styles.computedTotalCard}>
-              <Text style={styles.computedTotalLabel}>Total Projected Cost:</Text>
-              <Text style={styles.computedTotalValue}>
+            <View style={styles.totalCard}>
+              <Text style={styles.totalLabel}>Total Cost:</Text>
+              <Text style={styles.totalValue}>
                 Rs. {((parseFloat(offerQty) || 0) * (parseFloat(offerPrice) || 0)).toLocaleString()}
               </Text>
             </View>
 
-            <Pressable
-              style={styles.submitOfferBtn}
-              onPress={handleSendCounterOffer}>
-              <Text style={styles.submitOfferBtnText}>Send Offer to Chat</Text>
+            <Pressable style={styles.submitBtn} onPress={handleSendOffer} disabled={sending}>
+              {sending
+                ? <ActivityIndicator color="#FFF" />
+                : <Text style={styles.submitBtnTxt}>Send Offer 🤝</Text>
+              }
             </Pressable>
           </View>
         </Pressable>
@@ -580,521 +925,170 @@ export function ChatConversationScreen({
   );
 }
 
+// ─── Styles ────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFBF9',
-  },
-  loadingBox: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+
+  // Header
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
   },
-  backBtn: {
-    padding: 6,
-    marginRight: 4,
+  backBtn: { padding: 6, marginRight: 4 },
+  headerParticipant: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  avatarWrap: { position: 'relative' },
+  headerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E2E8F0' },
+  avatarPlaceholder: { backgroundColor: '#1E5E3A', alignItems: 'center', justifyContent: 'center' },
+  headerName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  headerSub: { fontSize: 11, color: '#166534', fontWeight: '500', marginTop: 1 },
+  headerActions: { flexDirection: 'row', gap: 4 },
+  headerIconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F8FAFC', alignItems: 'center', justifyContent: 'center' },
+
+  // Pinned bar
+  pinnedBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F0FDF4', paddingHorizontal: 14, paddingVertical: 8,
+    borderBottomWidth: 1, borderBottomColor: '#DCFCE7',
   },
-  headerParticipant: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+  pinnedThumb: { width: 36, height: 36, borderRadius: 8 },
+  pinnedTitle: { fontSize: 13, fontWeight: '700', color: '#166534' },
+  pinnedSub: { fontSize: 11, color: '#64748B' },
+  offerPillBtn: { backgroundColor: '#1E5E3A', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
+  offerPillText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+
+  // Quick prompts
+  promptsWrap: { backgroundColor: '#FFFFFF', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  promptsContent: { paddingHorizontal: 12, gap: 8 },
+  promptPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+  promptPillText: { fontSize: 11, color: '#334155', fontWeight: '600' },
+
+  // Empty state
+  emptyChatBox: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  emptyChatTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginTop: 12 },
+  emptyChatSub: { fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 6, lineHeight: 18 },
+
+  // Messages
+  msgList: { paddingHorizontal: 14, paddingVertical: 12 },
+  msgRow: { flexDirection: 'row', marginVertical: 4, alignItems: 'flex-end' },
+  msgRowLeft: { justifyContent: 'flex-start' },
+  msgRowRight: { justifyContent: 'flex-end' },
+  msgAvatar: { width: 30, height: 30, borderRadius: 15, marginRight: 6, marginBottom: 4 },
+  bubble: { maxWidth: '82%', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleMe: { backgroundColor: '#1E5E3A', borderBottomRightRadius: 4 },
+  bubbleThem: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E2E8F0' },
+  msgText: { fontSize: 14, lineHeight: 20 },
+  msgTextMe: { color: '#FFFFFF' },
+  msgTextThem: { color: '#0F172A' },
+  msgTime: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
+  msgTimeMe: { color: '#DCFCE7' },
+  msgTimeThem: { color: '#94A3B8' },
+
+  // Image
+  imgWrap: { width: 200, height: 150, borderRadius: 12, overflow: 'hidden', marginBottom: 6 },
+  imgAttach: { width: '100%', height: '100%' },
+
+  // Voice note
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, minWidth: 160 },
+  playCircle: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(100,116,139,0.6)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  headerAvatarWrap: {
-    position: 'relative',
-  },
-  headerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#E2E8F0',
-  },
-  headerOnlineDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#22C55E',
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
-  headerName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  headerTick: {
-    marginLeft: 4,
-    backgroundColor: '#1E5E3A',
-    borderRadius: 7,
-    width: 14,
-    height: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTickText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  headerStatusText: {
-    fontSize: 11,
-    color: '#166534',
-    fontWeight: '500',
-  },
-  headerIconsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  headerIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  producePinnedBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0FDF4',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#DCFCE7',
-  },
-  pinnedThumb: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-  },
-  pinnedTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#166534',
-  },
-  pinnedPrice: {
-    fontSize: 11,
-    color: '#64748B',
-  },
-  pinnedOfferBtn: {
-    backgroundColor: '#1E5E3A',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
-  pinnedOfferBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  quickPromptsWrap: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  quickPromptsContent: {
-    paddingHorizontal: 12,
-    gap: 8,
-  },
-  promptPill: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-  },
-  promptPillText: {
-    fontSize: 11,
-    color: '#334155',
-    fontWeight: '600',
-  },
-  messageList: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  msgRow: {
-    flexDirection: 'row',
-    marginVertical: 4,
-    alignItems: 'flex-end',
-  },
-  msgRowLeft: {
-    justifyContent: 'flex-start',
-  },
-  msgRowRight: {
-    justifyContent: 'flex-end',
-  },
-  msgAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 6,
-    marginBottom: 4,
-  },
-  bubble: {
-    maxWidth: '82%',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bubbleMe: {
-    backgroundColor: '#1E5E3A',
-    borderBottomRightRadius: 4,
-  },
-  bubbleThem: {
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  msgText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  msgTextMe: {
-    color: '#FFFFFF',
-  },
-  msgTextThem: {
-    color: '#0F172A',
-  },
-  msgTime: {
-    fontSize: 10,
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  msgTimeMe: {
-    color: '#DCFCE7',
-  },
-  msgTimeThem: {
-    color: '#94A3B8',
-  },
-  imageAttachWrap: {
-    width: 200,
-    height: 150,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  imageAttach: {
-    width: '100%',
-    height: '100%',
-  },
-  voiceNoteWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  voicePlayCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  voiceWaveforms: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 8,
-    gap: 3,
-  },
-  waveformBar: {
-    width: 3,
-    borderRadius: 2,
-  },
-  voiceDuration: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  playCircleMe: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  pauseIcon: { flexDirection: 'row', gap: 3 },
+  pauseBar: { width: 3, height: 12, backgroundColor: '#FFFFFF', borderRadius: 2 },
+  waveWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  wavebar: { width: 3, borderRadius: 2 },
+  voiceDur: { fontSize: 11, fontWeight: '600' },
+
+  // Offer card
   offerCard: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1.5,
-    borderColor: '#86EFAC',
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 6,
+    backgroundColor: '#F8FAFC', borderRadius: 12,
+    padding: 12, marginTop: 4, borderWidth: 1, borderColor: '#E2E8F0', minWidth: 230,
   },
-  offerCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
+  offerHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  offerCardTitle: { fontSize: 13, fontWeight: '800', color: '#0F172A' },
+  offerProduct: { fontSize: 12, color: '#1E5E3A', fontWeight: '700', marginBottom: 4 },
+  offerNote: { fontSize: 12, color: '#64748B', marginBottom: 8 },
+  offerRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  offerChip: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 8, padding: 8 },
+  offerChipLabel: { fontSize: 10, color: '#64748B', fontWeight: '600' },
+  offerChipVal: { fontSize: 13, fontWeight: '700', color: '#0F172A', marginTop: 2 },
+  offerTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0', marginBottom: 10 },
+  offerTotalLabel: { fontSize: 12, color: '#64748B' },
+  offerTotalVal: { fontSize: 16, fontWeight: '800', color: '#1E5E3A' },
+  offerBtns: { flexDirection: 'row', gap: 6 },
+  offerAcceptBtn: { flex: 1, backgroundColor: '#1E5E3A', borderRadius: 8, paddingVertical: 7, alignItems: 'center' },
+  offerAcceptTxt: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  offerDeclineBtn: { flex: 1, backgroundColor: '#FEE2E2', borderRadius: 8, paddingVertical: 7, alignItems: 'center' },
+  offerDeclineTxt: { color: '#B91C1C', fontSize: 12, fontWeight: '700' },
+  offerCounterBtn: { flex: 1, backgroundColor: '#EFF6FF', borderRadius: 8, paddingVertical: 7, alignItems: 'center' },
+  offerCounterTxt: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
+  offerPendingBox: { backgroundColor: '#FFF7ED', borderRadius: 8, paddingVertical: 6, alignItems: 'center' },
+  offerPendingTxt: { color: '#C2410C', fontSize: 11, fontWeight: '600' },
+  offerStatusBox: { borderRadius: 8, paddingVertical: 6, alignItems: 'center' },
+  offerStatusAccepted: { backgroundColor: '#DCFCE7' },
+  offerStatusDeclined: { backgroundColor: '#FEE2E2' },
+  offerStatusTxt: { fontSize: 12, fontWeight: '700', color: '#0F172A' },
+
+  // Recording bar
+  recordBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E2E8F0',
+    paddingHorizontal: 16, paddingVertical: 14, gap: 12,
   },
-  offerBadgeEmoji: {
-    fontSize: 14,
-    marginRight: 4,
-  },
-  offerCardTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#166534',
-  },
-  offerProduct: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  offerDetailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 4,
-  },
-  offerDetailText: {
-    fontSize: 12,
-    color: '#475569',
-  },
-  offerTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#BBF7D0',
-    paddingTop: 4,
-    marginTop: 4,
-  },
-  offerTotalLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#166534',
-  },
-  offerTotalVal: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#1E5E3A',
-  },
-  offerActionsRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-    gap: 6,
-  },
-  offerAcceptBtn: {
-    flex: 1,
-    backgroundColor: '#1E5E3A',
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  offerAcceptBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  offerDeclineBtn: {
-    paddingHorizontal: 8,
-    backgroundColor: '#FEE2E2',
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  offerDeclineBtnText: {
-    color: '#DC2626',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  offerCounterBtn: {
-    paddingHorizontal: 8,
-    backgroundColor: '#E2E8F0',
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  offerCounterBtnText: {
-    color: '#334155',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  offerStatusBadge: {
-    marginTop: 6,
-    paddingVertical: 4,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  offerAcceptedBadge: {
-    backgroundColor: '#DCFCE7',
-  },
-  offerDeclinedBadge: {
-    backgroundColor: '#FEE2E2',
-  },
-  offerStatusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#166534',
-  },
+  cancelRecordBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  cancelRecordTxt: { color: '#EF4444', fontSize: 14, fontWeight: '700' },
+  recordCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  recordDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#EF4444' },
+  recordTimer: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  recordHint: { fontSize: 11, color: '#64748B' },
+  sendRecordBtn: { backgroundColor: '#1E5E3A', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  sendRecordTxt: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+
+  // Input bar
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
+    flexDirection: 'row', alignItems: 'flex-end',
+    paddingHorizontal: 8, paddingVertical: 8,
+    backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 6,
   },
-  inputActionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  inputIconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
   textInput: {
-    flex: 1,
-    maxHeight: 90,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: '#0F172A',
-    marginHorizontal: 6,
+    flex: 1, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
+    fontSize: 14, color: '#0F172A', maxHeight: 100,
   },
-  sendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1E5E3A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F0FDF4',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  actionSheetContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 20,
-  },
-  actionSheetTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 14,
-  },
-  actionSheetItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC',
-  },
-  actionSheetIcon: {
-    fontSize: 22,
-    marginRight: 14,
-  },
-  actionSheetItemTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  actionSheetItemSub: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  actionSheetCancel: {
-    marginTop: 16,
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  actionSheetCancelText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#475569',
-  },
-  offerModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 20,
-  },
-  offerModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  offerModalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  offerModalSub: {
-    fontSize: 13,
-    color: '#64748B',
-    marginBottom: 16,
-  },
-  offerInputsRow: {
-    flexDirection: 'row',
-    marginBottom: 14,
-  },
-  inputFieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 6,
-  },
+  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#1E5E3A', alignItems: 'center', justifyContent: 'center' },
+  micBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center' },
+
+  // Action sheet
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  sheetTitle: { fontSize: 15, fontWeight: '800', color: '#0F172A', marginBottom: 16 },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', gap: 14 },
+  sheetIcon: { fontSize: 24 },
+  sheetItemTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  sheetItemSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  sheetCancel: { paddingVertical: 14, alignItems: 'center', marginTop: 8 },
+  sheetCancelTxt: { fontSize: 14, fontWeight: '700', color: '#94A3B8' },
+
+  // Offer modal
+  offerModal: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36 },
+  offerModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  offerModalTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A' },
+  offerModalSub: { fontSize: 13, color: '#64748B', marginBottom: 16, lineHeight: 18 },
+  offerInputRow: { flexDirection: 'row', marginBottom: 16 },
+  fieldLabel: { fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 6 },
   offerInput: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
+    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+    fontSize: 16, fontWeight: '700', color: '#0F172A',
   },
-  computedTotalCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F0FDF4',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 18,
-  },
-  computedTotalLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#166534',
-  },
-  computedTotalValue: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#1E5E3A',
-  },
-  submitOfferBtn: {
-    backgroundColor: '#1E5E3A',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  submitOfferBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
+  totalCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14, marginBottom: 16 },
+  totalLabel: { fontSize: 13, color: '#166534', fontWeight: '600' },
+  totalValue: { fontSize: 18, fontWeight: '800', color: '#1E5E3A' },
+  submitBtn: { backgroundColor: '#1E5E3A', borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  submitBtnTxt: { color: '#FFF', fontSize: 15, fontWeight: '800' },
 });

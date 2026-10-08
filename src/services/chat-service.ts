@@ -1,4 +1,16 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/**
+ * chat-service.ts
+ *
+ * Bidirectional in-memory chat store.
+ * Both buyer and farmer share the SAME conversationsCache (module-level singleton),
+ * so a message sent by the buyer WILL appear when the farmer opens the same
+ * conversation — no backend required.
+ *
+ * Sender identity:
+ *   - Every message carries senderRole: 'buyer' | 'farmer' (the role that sent it).
+ *   - The conversation screen determines "isMe" by comparing the message's
+ *     senderRole against the currentRole prop of the viewer.
+ */
 
 export interface ChatMessage {
   id: string;
@@ -8,18 +20,22 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   isRead: boolean;
-  imageUri?: string; // Base64 or URL
+  imageUri?: string;
   isVoiceNote?: boolean;
   voiceDuration?: string;
-  offer?: {
-    id: string;
-    productTitle: string;
-    quantity: number;
-    unit: string;
-    pricePerUnit: number;
-    totalAmount: number;
-    status: 'pending' | 'accepted' | 'declined' | 'countered';
-  };
+  voiceWaveform?: number[];
+  offer?: NegotiationOffer;
+}
+
+export interface NegotiationOffer {
+  id: string;
+  productTitle: string;
+  quantity: number;
+  unit: string;
+  pricePerUnit: number;
+  totalAmount: number;
+  status: 'pending' | 'accepted' | 'declined' | 'countered';
+  counterBy?: 'buyer' | 'farmer';
 }
 
 export interface Conversation {
@@ -65,12 +81,25 @@ export interface ReviewItem {
   };
   tags: string[];
   comment: string;
-  images?: string[]; // Base64
+  images?: string[];
   date: string;
   helpfulCount: number;
 }
 
-const INITIAL_CONVERSATIONS: Conversation[] = [
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function nowStr(offsetMinutes = 0): string {
+  const d = new Date(Date.now() - offsetMinutes * 60000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function generateWaveform(): number[] {
+  return Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 24));
+}
+
+// ─── Seed Data ────────────────────────────────────────────────────────────────
+
+const SEED_CONVERSATIONS: Conversation[] = [
   {
     id: 'c1',
     participantId: 'farmer-kusuma',
@@ -82,34 +111,34 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
     productTitle: 'Organic Red Tomatoes',
     productImage: 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400',
     lastMessage: 'I can harvest early morning and dispatch 100kg directly.',
-    lastMessageTime: '10:32 AM',
+    lastMessageTime: nowStr(32),
     unreadCount: 2,
     messages: [
       {
         id: 'm1',
-        senderId: 'buyer-user',
+        senderId: 'buyer',
         senderName: 'You',
         senderRole: 'buyer',
         text: 'Ayubowan! Is the 150kg tomatoes batch available for collection this Wednesday?',
-        timestamp: '10:15 AM',
+        timestamp: nowStr(45),
         isRead: true,
       },
       {
         id: 'm2',
-        senderId: 'farmer-kusuma',
+        senderId: 'farmer',
         senderName: 'Kusuma Bandara',
         senderRole: 'farmer',
         text: 'Ayubowan! Yes, the field harvest is in prime condition. Grade A sorting ready.',
-        timestamp: '10:18 AM',
+        timestamp: nowStr(42),
         isRead: true,
       },
       {
         id: 'm3',
-        senderId: 'buyer-user',
+        senderId: 'buyer',
         senderName: 'You',
         senderRole: 'buyer',
-        text: 'Can you offer a bulk price for 100 kg?',
-        timestamp: '10:20 AM',
+        text: 'Can you give me bulk price for 100 kg?',
+        timestamp: nowStr(40),
         isRead: true,
         offer: {
           id: 'off-1',
@@ -119,15 +148,16 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
           pricePerUnit: 220,
           totalAmount: 22000,
           status: 'pending',
+          counterBy: 'buyer',
         },
       },
       {
         id: 'm4',
-        senderId: 'farmer-kusuma',
+        senderId: 'farmer',
         senderName: 'Kusuma Bandara',
         senderRole: 'farmer',
         text: 'I can harvest early morning and dispatch 100kg directly.',
-        timestamp: '10:32 AM',
+        timestamp: nowStr(32),
         isRead: false,
       },
     ],
@@ -148,7 +178,7 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
     messages: [
       {
         id: 'm10',
-        senderId: 'buyer-sunil',
+        senderId: 'buyer',
         senderName: 'Sunil Dissanayake',
         senderRole: 'buyer',
         text: 'Can you dispatch the tomatoes before 10 AM?',
@@ -157,7 +187,7 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
       },
       {
         id: 'm11',
-        senderId: 'current-user',
+        senderId: 'farmer',
         senderName: 'You',
         senderRole: 'farmer',
         text: 'Yes sir, crates are labeled and packed for 9:30 AM pickup.',
@@ -182,7 +212,7 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
     messages: [
       {
         id: 'm20',
-        senderId: 'buyer-greenleaf',
+        senderId: 'buyer',
         senderName: 'Green Leaf Supermarket',
         senderRole: 'buyer',
         text: 'Invoice received. Transferring to commercial escrow account.',
@@ -207,7 +237,7 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
     messages: [
       {
         id: 'm30',
-        senderId: 'farmer-anura',
+        senderId: 'farmer',
         senderName: 'Anura Bandara',
         senderRole: 'farmer',
         text: 'Sent test sample batch with tracking #LK-9024.',
@@ -218,7 +248,7 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
   },
 ];
 
-const INITIAL_CALLS: CallRecord[] = [
+const SEED_CALLS: CallRecord[] = [
   {
     id: 'call-1',
     participantName: 'Kusuma Bandara',
@@ -250,7 +280,7 @@ const INITIAL_CALLS: CallRecord[] = [
   },
 ];
 
-const INITIAL_REVIEWS: ReviewItem[] = [
+const SEED_REVIEWS: ReviewItem[] = [
   {
     id: 'rev-1',
     targetId: 'farmer-kusuma',
@@ -258,12 +288,7 @@ const INITIAL_REVIEWS: ReviewItem[] = [
     authorRole: 'buyer',
     authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
     overallRating: 5,
-    criteriaRatings: {
-      quality: 5,
-      freshness: 5,
-      packaging: 5,
-      communication: 4,
-    },
+    criteriaRatings: { quality: 5, freshness: 5, packaging: 5, communication: 4 },
     tags: ['Fresh Produce', 'On Time Dispatch', 'Clean Packaging'],
     comment: 'Harvest was crisp and sweet. Arrived washed and sorted in ventilated wooden crates. Zero bruising. Perfect for our restaurant kitchen in Colombo.',
     date: '2 days ago',
@@ -276,12 +301,7 @@ const INITIAL_REVIEWS: ReviewItem[] = [
     authorRole: 'buyer',
     authorAvatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=400',
     overallRating: 5,
-    criteriaRatings: {
-      quality: 5,
-      freshness: 5,
-      packaging: 4,
-      communication: 5,
-    },
+    criteriaRatings: { quality: 5, freshness: 5, packaging: 4, communication: 5 },
     tags: ['Fair Pricing', 'Accurate Grading'],
     comment: 'Direct farm gate pricing saved us 20%. Getting 200kg straight from Welimada plots at guaranteed rates is a game changer.',
     date: '5 days ago',
@@ -289,17 +309,57 @@ const INITIAL_REVIEWS: ReviewItem[] = [
   },
 ];
 
-let conversationsCache: Conversation[] = [...INITIAL_CONVERSATIONS];
-let callHistoryCache: CallRecord[] = [...INITIAL_CALLS];
-let reviewsCache: ReviewItem[] = [...INITIAL_REVIEWS];
+// ─── Module-level singleton cache ─────────────────────────────────────────────
+
+let conversationsCache: Conversation[] = SEED_CONVERSATIONS.map((c) => ({
+  ...c,
+  messages: c.messages.map((m) => ({ ...m })),
+}));
+let callHistoryCache: CallRecord[] = [...SEED_CALLS];
+let reviewsCache: ReviewItem[] = [...SEED_REVIEWS];
+
+// ─── Auto-reply pool ──────────────────────────────────────────────────────────
+
+const FARMER_AUTO_REPLIES = [
+  'Sure, I can arrange that for you!',
+  'The harvest is fresh — picked this morning from Welimada fields.',
+  'I can offer a 5% bulk discount for orders above 100kg.',
+  'Let me check stock availability and get back to you shortly.',
+  'Grade A produce guaranteed. Ready for dispatch tomorrow morning.',
+  'We do free sorting and crate packaging for orders above 50kg.',
+  'Payment via escrow or direct bank transfer both accepted.',
+  'Yes, the field is ready. We can do 200kg this week.',
+];
+
+const BUYER_AUTO_REPLIES = [
+  "That sounds great! I'll confirm the order shortly.",
+  'Can you share a photo of the current stock?',
+  'We need delivery before 9 AM to the Colombo warehouse.',
+  "Perfect. I'll proceed with the order for 100kg.",
+  'Could you give a slightly better rate for a repeat order?',
+  'When is the next harvest ready?',
+  'We have a standing weekly order if quality is consistent.',
+];
+
+function randomReply(role: 'farmer' | 'buyer'): string {
+  const arr = role === 'farmer' ? FARMER_AUTO_REPLIES : BUYER_AUTO_REPLIES;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ─── ChatService ──────────────────────────────────────────────────────────────
 
 export const ChatService = {
+  // ── Conversations ──────────────────────────────────────────────────────────
+
   async getConversations(): Promise<Conversation[]> {
-    return conversationsCache;
+    return [...conversationsCache];
   },
 
   async getConversationById(id: string): Promise<Conversation | undefined> {
-    return conversationsCache.find((c) => c.id === id);
+    const conv = conversationsCache.find((c) => c.id === id);
+    if (!conv) return undefined;
+    // Return a shallow copy so state updates propagate
+    return { ...conv, messages: [...conv.messages] };
   },
 
   async getOrCreateConversation(params: {
@@ -338,25 +398,107 @@ export const ChatService = {
     return newConv;
   },
 
+  // ── Messaging ──────────────────────────────────────────────────────────────
+
+  /**
+   * Send a message.
+   * senderRole MUST be set to the role of the person sending ('buyer' or 'farmer').
+   * The chat screen determines "isMe" by comparing message.senderRole === currentRole.
+   */
   async sendMessage(
     conversationId: string,
     message: Omit<ChatMessage, 'id' | 'timestamp' | 'isRead'>
   ): Promise<ChatMessage> {
     const conv = conversationsCache.find((c) => c.id === conversationId);
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     const newMsg: ChatMessage = {
       ...message,
-      id: `msg_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: ts,
       isRead: false,
     };
 
     if (conv) {
-      conv.messages.push(newMsg);
-      conv.lastMessage = message.text || (message.imageUri ? '📷 [Photo]' : 'Proposed an offer');
-      conv.lastMessageTime = newMsg.timestamp;
+      conv.messages = [...conv.messages, newMsg];
+      conv.lastMessage =
+        newMsg.isVoiceNote
+          ? '🎙️ Voice note'
+          : newMsg.imageUri
+          ? '📷 Photo'
+          : newMsg.offer
+          ? '🤝 Offer proposal'
+          : newMsg.text;
+      conv.lastMessageTime = ts;
     }
+
     return newMsg;
   },
+
+  /**
+   * Simulate a reply from the OTHER party (auto-reply for demo purposes).
+   * Call this right after sendMessage to make the chat feel alive.
+   *
+   * @param conversationId - conversation to reply in
+   * @param replyAs        - which ROLE auto-replies (the OTHER person)
+   * @param replyName      - display name shown in the bubble
+   * @param onReply        - called after reply is added so the UI can re-render
+   */
+  simulateReply(
+    conversationId: string,
+    replyAs: 'farmer' | 'buyer',
+    replyName: string,
+    onReply: () => void
+  ): void {
+    const delay = 1200 + Math.random() * 2500;
+    setTimeout(() => {
+      const conv = conversationsCache.find((c) => c.id === conversationId);
+      if (!conv) return;
+
+      const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const replyMsg: ChatMessage = {
+        id: `reply_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        senderId: replyAs,
+        senderName: replyName,
+        senderRole: replyAs,
+        text: randomReply(replyAs),
+        timestamp: ts,
+        isRead: false,
+      };
+
+      conv.messages = [...conv.messages, replyMsg];
+      conv.lastMessage = replyMsg.text;
+      conv.lastMessageTime = ts;
+      conv.unreadCount = (conv.unreadCount || 0) + 1;
+
+      onReply();
+    }, delay);
+  },
+
+  // ── Voice notes ────────────────────────────────────────────────────────────
+
+  /**
+   * Build a voice note message payload (no id/timestamp/isRead — pass to sendMessage).
+   */
+  createVoiceNotePayload(params: {
+    senderRole: 'farmer' | 'buyer';
+    senderName: string;
+    durationSeconds: number;
+  }): Omit<ChatMessage, 'id' | 'timestamp' | 'isRead'> {
+    const mins = Math.floor(params.durationSeconds / 60);
+    const secs = params.durationSeconds % 60;
+    return {
+      senderId: params.senderRole,
+      senderName: params.senderName,
+      senderRole: params.senderRole,
+      text: '',
+      isVoiceNote: true,
+      voiceDuration: `${mins}:${secs.toString().padStart(2, '0')}`,
+      voiceWaveform: generateWaveform(),
+    };
+  },
+
+  // ── Offer negotiation ──────────────────────────────────────────────────────
 
   async updateOfferStatus(
     conversationId: string,
@@ -365,9 +507,11 @@ export const ChatService = {
   ): Promise<void> {
     const conv = conversationsCache.find((c) => c.id === conversationId);
     if (!conv) return;
-    const msg = conv.messages.find((m) => m.id === messageId);
-    if (msg && msg.offer) {
-      msg.offer.status = status;
+    const idx = conv.messages.findIndex((m) => m.id === messageId);
+    if (idx !== -1 && conv.messages[idx].offer) {
+      conv.messages = conv.messages.map((m, i) =>
+        i === idx ? { ...m, offer: { ...m.offer!, status } } : m
+      );
     }
   },
 
@@ -375,27 +519,26 @@ export const ChatService = {
     const conv = conversationsCache.find((c) => c.id === conversationId);
     if (conv) {
       conv.unreadCount = 0;
-      conv.messages.forEach((m) => (m.isRead = true));
+      conv.messages = conv.messages.map((m) => ({ ...m, isRead: true }));
     }
   },
+
+  // ── Call History ───────────────────────────────────────────────────────────
 
   async getCallHistory(): Promise<CallRecord[]> {
     return callHistoryCache;
   },
 
   async addCallRecord(record: Omit<CallRecord, 'id'>): Promise<CallRecord> {
-    const newRecord: CallRecord = {
-      ...record,
-      id: `call_${Date.now()}`,
-    };
+    const newRecord: CallRecord = { ...record, id: `call_${Date.now()}` };
     callHistoryCache = [newRecord, ...callHistoryCache];
     return newRecord;
   },
 
+  // ── Reviews ────────────────────────────────────────────────────────────────
+
   async getReviews(targetId?: string): Promise<ReviewItem[]> {
-    if (targetId) {
-      return reviewsCache.filter((r) => r.targetId === targetId);
-    }
+    if (targetId) return reviewsCache.filter((r) => r.targetId === targetId);
     return reviewsCache;
   },
 
