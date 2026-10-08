@@ -15,6 +15,7 @@ import { Image } from 'expo-image';
 import Svg, { Path, Rect, Circle } from 'react-native-svg';
 import { useCart, CartItem } from '@/context/cart-context';
 import { OrderService, OrderItem, FarmoraOrder } from '@/services/order-service';
+import { getStoredUser } from '@/services/api';
 import { StripePaymentModal } from './stripe-payment-modal';
 
 interface CheckoutScreenProps {
@@ -87,10 +88,19 @@ export function CheckoutScreen({ onBack, onOrderSuccess, directItems }: Checkout
   const processOrder = async (stripePaymentIntentId?: string) => {
     setIsSubmitting(true);
     try {
+      const storedUser = await getStoredUser();
+      const buyerId = storedUser?.id || storedUser?._id || 'buyer-sunil';
+
       const createdOrder = await OrderService.createNewOrder({
-        buyerName: address.recipient,
-        buyerPhone: address.phone,
+        buyerId,
+        buyerName: address.recipient || storedUser?.fullName || 'Sunil Dissanayake',
+        buyerPhone: address.phone || storedUser?.mobileNumber || '+94 77 123 4567',
         buyerLocation: `${address.street}, ${address.city}, ${address.district}`,
+        farmerId: 'farmer-kusuma',
+        farmerName: 'Kusuma Bandara',
+        farmerFarm: 'Govigedara Highland Farm, Welimada',
+        farmerPhone: '+94 71 890 1234',
+        farmerAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
         items,
         subtotal,
         deliveryFee: deliveryCost,
@@ -105,9 +115,6 @@ export function CheckoutScreen({ onBack, onOrderSuccess, directItems }: Checkout
           : 'Pending',
         stripePaymentIntentId,
         notes: deliveryInstructions.trim(),
-        farmerName: 'Kamal Gunawardana',
-        farmerFarm: 'Green Haven Organics',
-        farmerPhone: '+94 71 890 1234',
       });
 
       // Clear cart if completed

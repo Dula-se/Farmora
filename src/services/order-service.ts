@@ -132,6 +132,32 @@ const INITIAL_ORDERS: FarmoraOrder[] = [
 
 let ordersCache: FarmoraOrder[] = [...INITIAL_ORDERS];
 
+async function loadStoredOrders(): Promise<FarmoraOrder[]> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return [...INITIAL_ORDERS];
+}
+
+function mergeOrderLists(primary: FarmoraOrder[], secondary: FarmoraOrder[]): FarmoraOrder[] {
+  const map = new Map<string, FarmoraOrder>();
+  for (const o of secondary) {
+    const key = o.orderNumber || o.id || o._id || '';
+    if (key) map.set(key, o);
+  }
+  for (const o of primary) {
+    const key = o.orderNumber || o.id || o._id || '';
+    if (key) map.set(key, o);
+  }
+  return Array.from(map.values());
+}
+
 function mapDbOrder(dbOrder: any): FarmoraOrder {
   const statusMap: Record<string, OrderStatus> = {
     pending_dispatch: 'Pending Dispatch',
@@ -195,37 +221,58 @@ export const OrderService = {
   },
 
   async getBuyerOrders(): Promise<FarmoraOrder[]> {
+    const local = await loadStoredOrders();
+
     try {
       const user = await getStoredUser();
       const buyerId = user?.id || user?._id || '';
 
-      const res = await apiFetch<any[]>(`/orders/buyer?buyerId=${buyerId}`);
+      const query = buyerId ? `?buyerId=${encodeURIComponent(buyerId)}` : '';
+      const res = await apiFetch<any[]>(`/orders/buyer${query}`);
       if (res.data && Array.isArray(res.data) && res.data.length > 0) {
         const mapped = res.data.map(mapDbOrder);
-        ordersCache = mapped;
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(mapped)).catch(() => {});
-        return mapped;
+        const merged = mergeOrderLists(local, mapped);
+        ordersCache = merged;
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged)).catch(() => {});
+        return merged;
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[OrderService] getBuyerOrders API fetch fallback:', e);
+    }
 
-    return [...ordersCache];
+    ordersCache = local;
+    return [...local];
   },
 
   async getFarmerOrders(): Promise<FarmoraOrder[]> {
+    const local = await loadStoredOrders();
+
     try {
       const user = await getStoredUser();
       const farmerId = user?.id || user?._id || '';
 
-      const res = await apiFetch<any[]>(`/orders/farmer?farmerId=${farmerId}`);
+      const query = farmerId ? `?farmerId=${encodeURIComponent(farmerId)}` : '';
+      const res = await apiFetch<any[]>(`/orders/farmer${query}`);
       if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-        return res.data.map(mapDbOrder);
+        const mapped = res.data.map(mapDbOrder);
+        const merged = mergeOrderLists(local, mapped);
+        ordersCache = merged;
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged)).catch(() => {});
+        return merged;
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[OrderService] getFarmerOrders API fetch fallback:', e);
+    }
 
-    return [...ordersCache];
+    ordersCache = local;
+    return [...local];
   },
 
   async getOrderById(orderId: string): Promise<FarmoraOrder | null> {
+    const local = await loadStoredOrders();
+    const cached = local.find((o) => o.id === orderId || o.orderNumber === orderId);
+    if (cached) return cached;
+
     try {
       const res = await apiFetch<any>(`/orders/${orderId}`);
       if (res.data) {
@@ -233,8 +280,7 @@ export const OrderService = {
       }
     } catch {}
 
-    const found = ordersCache.find((o) => o.id === orderId || o.orderNumber === orderId);
-    return found || null;
+    return null;
   },
 
   async updateOrderStatus(orderId: string, status: OrderStatus): Promise<FarmoraOrder | null> {
@@ -246,6 +292,14 @@ export const OrderService = {
       Cancelled: 'cancelled',
     };
 
+    let local = await loadStoredOrders();
+    const index = local.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
+    if (index !== -1) {
+      local[index] = { ...local[index], status };
+      ordersCache = local;
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(local)).catch(() => {});
+    }
+
     try {
       const res = await apiFetch<any>(`/orders/${orderId}/status`, {
         method: 'PATCH',
@@ -256,12 +310,7 @@ export const OrderService = {
       }
     } catch {}
 
-    const index = ordersCache.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
-    if (index !== -1) {
-      ordersCache[index] = { ...ordersCache[index], status };
-      return ordersCache[index];
-    }
-    return null;
+    return index !== -1 ? local[index] : null;
   },
 
   async verifyDeliveryQr(orderId: string, pin: string): Promise<FarmoraOrder | null> {
@@ -279,42 +328,62 @@ export const OrderService = {
   },
 
   async markOrderRated(orderId: string): Promise<void> {
-    const index = ordersCache.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
+    const local = await loadStoredOrders();
+    const index = local.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
     if (index !== -1) {
-      ordersCache[index] = { ...ordersCache[index], ratingSubmitted: true };
+      local[index] = { ...local[index], ratingSubmitted: true };
+      ordersCache = local;
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(local)).catch(() => {});
     }
   },
 
   async createNewOrder(orderData: Partial<FarmoraOrder>): Promise<FarmoraOrder> {
+    const user = await getStoredUser();
+    const buyerId = orderData.buyerId || user?.id || user?._id || 'buyer-sunil';
+    const buyerName = orderData.buyerName || user?.fullName || 'Sunil Dissanayake';
+    const buyerPhone = orderData.buyerPhone || user?.mobileNumber || '+94 77 123 4567';
+    const farmerId = orderData.farmerId || 'farmer-kusuma';
+
+    const fullPayload = {
+      ...orderData,
+      buyerId,
+      buyerName,
+      buyerPhone,
+      farmerId,
+    };
+
+    let currentList = await loadStoredOrders();
+
     try {
       const res = await apiFetch<any>('/orders', {
         method: 'POST',
-        body: JSON.stringify(orderData),
+        body: JSON.stringify(fullPayload),
       });
 
       if (res.data) {
         const created = mapDbOrder(res.data);
-        ordersCache = [created, ...ordersCache];
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(ordersCache)).catch(() => {});
+        const updated = [created, ...currentList.filter(o => o.orderNumber !== created.orderNumber)];
+        ordersCache = updated;
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
         return created;
       }
     } catch (e) {
-      console.warn('[OrderService] createNewOrder network error, falling back locally:', e);
+      console.warn('[OrderService] createNewOrder network error, creating locally:', e);
     }
 
     const nextNum = Math.floor(1000 + Math.random() * 9000);
     const newOrd: FarmoraOrder = {
       id: `ord-${nextNum}`,
       orderNumber: `#ORD-${nextNum}`,
-      buyerId: orderData.buyerId || 'buyer-1',
-      buyerName: orderData.buyerName || 'Buyer',
-      buyerPhone: orderData.buyerPhone || '+94 77 123 4567',
+      buyerId,
+      buyerName,
+      buyerPhone,
       buyerLocation: orderData.buyerLocation || 'Colombo, Sri Lanka',
-      farmerId: orderData.farmerId || 'farmer-1',
-      farmerName: orderData.farmerName || 'Farmer',
-      farmerFarm: orderData.farmerFarm || 'Local Farm',
+      farmerId,
+      farmerName: orderData.farmerName || 'Kusuma Bandara',
+      farmerFarm: orderData.farmerFarm || 'Govigedara Highland Farm, Welimada',
       farmerPhone: orderData.farmerPhone || '+94 71 890 1234',
-      farmerAvatar: orderData.farmerAvatar || '',
+      farmerAvatar: orderData.farmerAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
       items: orderData.items || [],
       subtotal: orderData.subtotal || 0,
       deliveryFee: orderData.deliveryFee ?? 1500,
@@ -332,10 +401,12 @@ export const OrderService = {
       securityPin: '4821',
       orderDate: 'Just now',
       expectedDelivery: 'Tomorrow by 04:00 PM',
+      notes: orderData.notes,
     };
 
-    ordersCache = [newOrd, ...ordersCache];
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(ordersCache)).catch(() => {});
+    const updated = [newOrd, ...currentList];
+    ordersCache = updated;
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
     return newOrd;
   },
 };

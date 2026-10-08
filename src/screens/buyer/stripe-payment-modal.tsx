@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Modal,
   Platform,
   Pressable,
@@ -42,6 +44,12 @@ export function StripePaymentModal({
   const [postalCode, setPostalCode] = useState('00100');
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [successIntentId, setSuccessIntentId] = useState('');
+
+  const scaleAnim = useRef(new Animated.Value(0.2)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // Format card number with spaces (4 4 4 4)
   const handleCardNumberChange = (text: string) => {
@@ -125,7 +133,46 @@ export function StripePaymentModal({
 
       if (result.success) {
         setIsProcessing(false);
-        onSuccess(result.paymentIntentId);
+        setIsSuccess(true);
+        setSuccessIntentId(result.paymentIntentId);
+
+        // Success spring & fade animation
+        Animated.parallel([
+          Animated.spring(scaleAnim, {
+            toValue: 1,
+            friction: 4,
+            tension: 50,
+            useNativeDriver: true,
+          }),
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+
+        // Pulsing glow animation loop
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.15,
+              duration: 750,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 750,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+          ])
+        ).start();
+
+        setTimeout(() => {
+          setIsSuccess(false);
+          onSuccess(result.paymentIntentId);
+        }, 1700);
       } else {
         throw new Error(`Payment status: ${result.status}`);
       }
@@ -140,25 +187,62 @@ export function StripePaymentModal({
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheetContainer}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.dragHandle} />
-            <View style={styles.headerRow}>
-              <View style={styles.headerLeft}>
-                <View style={styles.stripeBadge}>
-                  <Text style={styles.stripeBadgeText}>STRIPE TEST MODE</Text>
-                </View>
-                <Text style={styles.sheetTitle}>{title}</Text>
-                <Text style={styles.sheetSub}>{description}</Text>
+          {isSuccess ? (
+            <View style={styles.celebrationBox}>
+              <View style={styles.successHaloWrap}>
+                <Animated.View style={[styles.haloRing, { transform: [{ scale: pulseAnim }] }]} />
+                <Animated.View
+                  style={[
+                    styles.successCircleMain,
+                    {
+                      transform: [{ scale: scaleAnim }],
+                      opacity: fadeAnim,
+                    },
+                  ]}>
+                  <Svg width={46} height={46} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round">
+                    <Path d="M20 6L9 17l-5-5" />
+                  </Svg>
+                </Animated.View>
               </View>
 
-              <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M18 6L6 18M6 6l12 12" />
-                </Svg>
-              </Pressable>
+              <Text style={styles.celebrationTitle}>Payment Successful! 🎉</Text>
+              <Text style={styles.celebrationAmount}>Rs. {amount.toLocaleString()} LKR</Text>
+              <Text style={styles.celebrationDesc}>
+                Paid securely via Stripe 256-bit SSL encrypted gateway.
+              </Text>
+
+              <View style={styles.celebrationBadge}>
+                <Text style={styles.celebrationBadgeText}>
+                  🛡️ Ref: {successIntentId ? successIntentId.slice(0, 24) : 'pi_test_confirmed'}...
+                </Text>
+              </View>
+
+              <View style={styles.confirmingBox}>
+                <ActivityIndicator size="small" color="#16A34A" />
+                <Text style={styles.confirmingText}>Confirming order & creating invoice...</Text>
+              </View>
             </View>
-          </View>
+          ) : (
+            <>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={styles.dragHandle} />
+                <View style={styles.headerRow}>
+                  <View style={styles.headerLeft}>
+                    <View style={styles.stripeBadge}>
+                      <Text style={styles.stripeBadgeText}>STRIPE TEST MODE</Text>
+                    </View>
+                    <Text style={styles.sheetTitle}>{title}</Text>
+                    <Text style={styles.sheetSub}>{description}</Text>
+                  </View>
+
+                  <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+                    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                      <Path d="M18 6L6 18M6 6l12 12" />
+                    </Svg>
+                  </Pressable>
+                </View>
+              </View>
 
           <ScrollView style={styles.body} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* Amount Banner */}
@@ -297,9 +381,11 @@ export function StripePaymentModal({
             </Pressable>
             <View style={{ height: 28 }} />
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+        </>
+      )}
+    </View>
+  </View>
+</Modal>
   );
 }
 
@@ -511,5 +597,83 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#64748B',
+  },
+  celebrationBox: {
+    paddingHorizontal: 24,
+    paddingVertical: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successHaloWrap: {
+    width: 100,
+    height: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  haloRing: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#DCFCE7',
+  },
+  successCircleMain: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  celebrationTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  celebrationAmount: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#16A34A',
+    marginBottom: 8,
+  },
+  celebrationDesc: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+  },
+  celebrationBadge: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 20,
+  },
+  celebrationBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  confirmingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmingText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#166534',
   },
 });

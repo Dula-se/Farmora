@@ -4,6 +4,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -32,6 +33,7 @@ export function FarmerOrdersScreen({
   onTrackOrder,
 }: FarmerOrdersScreenProps) {
   const [orders, setOrders] = useState<FarmoraOrder[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'dispatched' | 'delivered'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -49,8 +51,10 @@ export function FarmerOrdersScreen({
   }, []);
 
   const loadOrders = async () => {
+    setRefreshing(true);
     const list = await OrderService.getFarmerOrders();
     setOrders(list);
+    setRefreshing(false);
   };
 
   const handleConfirmDispatch = async () => {
@@ -194,7 +198,10 @@ export function FarmerOrdersScreen({
       {/* Orders List */}
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={loadOrders} colors={['#1E5E3A']} />
+        }>
         {filteredOrders.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={{ fontSize: 40, marginBottom: 10 }}>📦</Text>
@@ -285,43 +292,53 @@ export function FarmerOrdersScreen({
                   </View>
                 </View>
 
-                {/* Action Controls */}
-                <View style={styles.actionsRow}>
+                {/* Action Controls - Spacious 2-Tier Layout */}
+                <View style={styles.cardActionsContainer}>
+                  {/* Tier 1: Primary Status Action */}
                   {isPending && (
                     <Pressable
-                      style={styles.dispatchPrimaryBtn}
+                      style={styles.primaryFulfillBtn}
                       onPress={() => setDispatchOrder(ord)}>
-                      <Text style={styles.dispatchPrimaryBtnText}>🚚 Dispatch Produce</Text>
+                      <Text style={styles.primaryFulfillBtnText}>🚚 Dispatch & Assign Logistics</Text>
                     </Pressable>
                   )}
 
                   {isDispatched && (
                     <Pressable
-                      style={styles.markDeliveredBtn}
+                      style={styles.markDeliveredPrimaryBtn}
                       onPress={() => handleMarkDelivered(ord)}>
-                      <Text style={styles.markDeliveredBtnText}>✓ Mark Delivered</Text>
+                      <Text style={styles.markDeliveredPrimaryBtnText}>✓ Mark Delivered & Release Escrow</Text>
                     </Pressable>
                   )}
 
-                  {onTrackOrder && (
+                  {isDelivered && (
+                    <View style={styles.deliveredBadgeBanner}>
+                      <Text style={styles.deliveredBadgeText}>✓ Order Delivered • Farm Payout Released</Text>
+                    </View>
+                  )}
+
+                  {/* Tier 2: Secondary Communication & Logistics Controls */}
+                  <View style={styles.secondaryControlsRow}>
+                    {onTrackOrder && (
+                      <Pressable
+                        style={styles.trackControlBtn}
+                        onPress={() => onTrackOrder(ord)}>
+                        <Text style={styles.trackControlBtnText}>📍 Track & PIN</Text>
+                      </Pressable>
+                    )}
+
                     <Pressable
-                      style={[styles.chatBtn, { backgroundColor: '#F0FDF4', borderColor: '#86EFAC', borderWidth: 1 }]}
-                      onPress={() => onTrackOrder(ord)}>
-                      <Text style={[styles.chatBtnText, { color: '#166534', fontWeight: '800' }]}>📍 Track & PIN</Text>
+                      style={styles.chatControlBtn}
+                      onPress={() => onChatBuyer(ord.buyerName, ord.buyerId, ord.orderNumber)}>
+                      <Text style={styles.chatControlBtnText}>💬 Chat</Text>
                     </Pressable>
-                  )}
 
-                  <Pressable
-                    style={styles.chatBtn}
-                    onPress={() => onChatBuyer(ord.buyerName, ord.buyerId, ord.orderNumber)}>
-                    <Text style={styles.chatBtnText}>💬 Chat</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.rateBuyerBtn}
-                    onPress={() => onRateBuyer(ord.buyerName, ord.buyerId)}>
-                    <Text style={styles.rateBuyerBtnText}>⭐ Rate Buyer</Text>
-                  </Pressable>
+                    <Pressable
+                      style={styles.rateControlBtn}
+                      onPress={() => onRateBuyer(ord.buyerName, ord.buyerId)}>
+                      <Text style={styles.rateControlBtnText}>⭐ Rate Buyer</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             );
@@ -743,60 +760,111 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#166534',
   },
-  actionsRow: {
+  cardActionsContainer: {
+    marginTop: 10,
+    gap: 8,
+  },
+  primaryFulfillBtn: {
+    width: '100%',
+    backgroundColor: '#1E5E3A',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#1E5E3A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  primaryFulfillBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  markDeliveredPrimaryBtn: {
+    width: '100%',
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  markDeliveredPrimaryBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  deliveredBadgeBanner: {
+    width: '100%',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  deliveredBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  secondaryControlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 6,
   },
-  dispatchPrimaryBtn: {
-    flex: 2,
-    backgroundColor: '#1E5E3A',
-    paddingVertical: 9,
+  trackControlBtn: {
+    flex: 1.15,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dispatchPrimaryBtnText: {
+  trackControlBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  chatControlBtn: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatControlBtnText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  markDeliveredBtn: {
-    flex: 2,
-    backgroundColor: '#059669',
-    paddingVertical: 9,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markDeliveredBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  chatBtn: {
-    flex: 1.2,
-    backgroundColor: '#F1F5F9',
-    paddingVertical: 9,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chatBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
     color: '#334155',
   },
-  rateBuyerBtn: {
-    flex: 1.4,
+  rateControlBtn: {
+    flex: 1.15,
     backgroundColor: '#FEF3C7',
-    paddingVertical: 9,
+    borderWidth: 1.5,
+    borderColor: '#FDE68A',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rateBuyerBtnText: {
+  rateControlBtnText: {
     fontSize: 12,
     fontWeight: '700',
     color: '#B45309',

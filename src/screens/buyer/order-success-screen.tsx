@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
+  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -16,34 +17,82 @@ interface OrderSuccessScreenProps {
   order: FarmoraOrder;
   onTrackOrder: (orderId: string) => void;
   onHomePress: () => void;
+  onViewOrders?: () => void;
 }
 
 export function OrderSuccessScreen({
   order,
   onTrackOrder,
   onHomePress,
+  onViewOrders,
 }: OrderSuccessScreenProps) {
   const insets = useSafeAreaInsets();
+  const heroScale = useRef(new Animated.Value(0.3)).current;
+  const heroFade = useRef(new Animated.Value(0)).current;
+  const badgesFade = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(heroScale, {
+          toValue: 1,
+          friction: 4,
+          tension: 55,
+          useNativeDriver: true,
+        }),
+        Animated.timing(heroFade, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.timing(badgesFade, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Animated-style Checkmark Hero */}
+        {/* Animated Checkmark Hero */}
         <View style={styles.heroBox}>
-          <View style={styles.outerCircle}>
+          <Animated.View
+            style={[
+              styles.outerCircle,
+              {
+                transform: [{ scale: heroScale }],
+                opacity: heroFade,
+              },
+            ]}>
             <View style={styles.innerCircle}>
               <Svg width={44} height={44} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
                 <Path d="M20 6L9 17l-5-5" />
               </Svg>
             </View>
-          </View>
+          </Animated.View>
 
-          <Text style={styles.title}>Payment Successful!</Text>
+          <Text style={styles.title}>Payment Successful! 🎉</Text>
           <Text style={styles.subTitle}>
             Your order has been placed directly with the farm. You can track real-time dispatch and delivery below.
           </Text>
+
+          {/* Celebratory Feature Chips */}
+          <Animated.View style={[styles.celebrationChipsRow, { opacity: badgesFade }]}>
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>🌿 100% Farm Fresh</Text>
+            </View>
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>🛡️ Escrow Guard</Text>
+            </View>
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>🚚 Direct Freight</Text>
+            </View>
+          </Animated.View>
         </View>
 
         {/* Receipt Card */}
@@ -122,6 +171,12 @@ export function OrderSuccessScreen({
           </Svg>
           <Text style={styles.trackBtnText}>Track Order Live</Text>
         </Pressable>
+
+        {onViewOrders && (
+          <Pressable style={styles.viewOrdersBtn} onPress={onViewOrders}>
+            <Text style={styles.viewOrdersBtnText}>📦 View in My Orders</Text>
+          </Pressable>
+        )}
 
         <Pressable style={styles.homeBtn} onPress={onHomePress}>
           <Text style={styles.homeBtnText}>Return to Marketplace</Text>
@@ -331,5 +386,40 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#475569',
+  },
+  celebrationChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
+  chip: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  viewOrdersBtn: {
+    width: '100%',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  viewOrdersBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#166534',
   },
 });

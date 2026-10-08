@@ -4,6 +4,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -34,6 +35,7 @@ export function BuyerOrdersScreen({
   onTrackOrder,
 }: BuyerOrdersScreenProps) {
   const [orders, setOrders] = useState<FarmoraOrder[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'delivered'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<FarmoraOrder | null>(null);
@@ -43,8 +45,10 @@ export function BuyerOrdersScreen({
   }, []);
 
   const loadOrders = async () => {
+    setRefreshing(true);
     const list = await OrderService.getBuyerOrders();
     setOrders(list);
+    setRefreshing(false);
   };
 
   const filteredOrders = orders.filter((ord) => {
@@ -145,7 +149,10 @@ export function BuyerOrdersScreen({
       {/* Orders List */}
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={loadOrders} colors={['#1E5E3A']} />
+        }>
         {filteredOrders.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={{ fontSize: 44, marginBottom: 12 }}>📦</Text>
@@ -262,41 +269,47 @@ export function BuyerOrdersScreen({
                   </View>
                 </View>
 
-                {/* Action Buttons */}
-                <View style={styles.cardActionsRow}>
-                  {onTrackOrder && (
+                {/* Action Buttons - 2 Spacious Tiers */}
+                <View style={styles.cardActionsContainer}>
+                  {/* Primary Row: Live Tracking & Chat */}
+                  <View style={styles.primaryActionRow}>
+                    {onTrackOrder && (
+                      <Pressable
+                        style={styles.trackPrimaryBtn}
+                        onPress={() => onTrackOrder(ord)}>
+                        <Text style={styles.trackPrimaryBtnText}>📍 Track & PIN</Text>
+                      </Pressable>
+                    )}
+
                     <Pressable
-                      style={[styles.invoiceBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
-                      onPress={() => onTrackOrder(ord)}>
-                      <Text style={[styles.invoiceBtnText, { color: '#166534', fontWeight: '800' }]}>📍 Track & PIN</Text>
+                      style={styles.chatActionBtn}
+                      onPress={() => onChatFarmer(ord.farmerName, ord.farmerId, ord.orderNumber)}>
+                      <Text style={styles.chatActionBtnText}>💬 Chat Farmer</Text>
                     </Pressable>
-                  )}
+                  </View>
 
-                  <Pressable
-                    style={styles.chatActionBtn}
-                    onPress={() => onChatFarmer(ord.farmerName, ord.farmerId, ord.orderNumber)}>
-                    <Text style={styles.chatActionBtnText}>💬 Chat Farmer</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={styles.invoiceBtn}
-                    onPress={() => setSelectedInvoiceOrder(ord)}>
-                    <Text style={styles.invoiceBtnText}>📄 Invoice</Text>
-                  </Pressable>
-
-                  {isDelivered && (
+                  {/* Secondary Row: Commercial Invoice, Rating, Dispute */}
+                  <View style={styles.secondaryActionRow}>
                     <Pressable
-                      style={styles.rateBtn}
-                      onPress={() => onRateOrder(ord)}>
-                      <Text style={styles.rateBtnText}>⭐ Rate</Text>
+                      style={styles.invoiceBtn}
+                      onPress={() => setSelectedInvoiceOrder(ord)}>
+                      <Text style={styles.invoiceBtnText}>📄 Invoice</Text>
                     </Pressable>
-                  )}
 
-                  <Pressable
-                    style={styles.reportBtn}
-                    onPress={() => onReportIssue(ord)}>
-                    <Text style={styles.reportBtnText}>⚠️ Dispute</Text>
-                  </Pressable>
+                    {isDelivered && (
+                      <Pressable
+                        style={styles.rateBtn}
+                        onPress={() => onRateOrder(ord)}>
+                        <Text style={styles.rateBtnText}>⭐ Rate</Text>
+                      </Pressable>
+                    )}
+
+                    <Pressable
+                      style={styles.reportBtn}
+                      onPress={() => onReportIssue(ord)}>
+                      <Text style={styles.reportBtnText}>⚠️ Dispute</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             );
@@ -699,29 +712,54 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#166534',
   },
-  cardActionsRow: {
+  cardActionsContainer: {
+    marginTop: 10,
+    gap: 8,
+  },
+  primaryActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 6,
+  },
+  trackPrimaryBtn: {
+    flex: 1,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackPrimaryBtnText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#166534',
   },
   chatActionBtn: {
-    flex: 2,
+    flex: 1,
     backgroundColor: '#1E5E3A',
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   chatActionBtnText: {
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '700',
     color: '#FFFFFF',
   },
+  secondaryActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   invoiceBtn: {
-    flex: 1.2,
+    flex: 1,
     backgroundColor: '#F1F5F9',
-    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 8,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -734,7 +772,9 @@ const styles = StyleSheet.create({
   rateBtn: {
     flex: 1,
     backgroundColor: '#FEF3C7',
-    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    paddingVertical: 8,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -745,10 +785,12 @@ const styles = StyleSheet.create({
     color: '#B45309',
   },
   reportBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 9,
+    flex: 0.9,
+    paddingVertical: 8,
     borderRadius: 10,
     backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
     alignItems: 'center',
     justifyContent: 'center',
   },

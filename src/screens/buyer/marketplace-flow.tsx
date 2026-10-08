@@ -729,6 +729,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
               setTrackingOrderId(ordId);
               setCurrentView('order-tracking');
             }}
+            onViewOrders={() => setCurrentView('buyer-orders')}
             onHomePress={() => setCurrentView('home')}
           />
         )}
