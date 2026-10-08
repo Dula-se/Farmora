@@ -30,9 +30,9 @@ interface FarmerPublicProfileScreenProps {
   farmerAvatar?: string;
   onBack?: () => void;
   onSelectProduce?: (produce: ApiProduceItem) => void;
-  onOpenChat?: (farmer: { id: string; name: string }) => void;
+  onOpenChat?: (farmer: { id: string; name: string; avatar?: string }) => void;
   onRateFarmer?: (farmer: { id: string; name: string; avatar?: string }) => void;
-  onViewOnMap?: (farmer: { id: string; name: string }) => void;
+  onViewOnMap?: (farmer: { id: string; name: string; avatar?: string }) => void;
 }
 
 export function FarmerPublicProfileScreen({
@@ -107,92 +107,67 @@ export function FarmerPublicProfileScreen({
   };
 
   const loadProfile = async () => {
+    const resolvedName = farmerName || 'Verified Farmer';
     setLoading(true);
     try {
       const data = await fetchPublicFarmerProfile(farmerId);
-      setProfile(data);
-      if (data?.fullName) {
-        loadFarmerReviews(data.fullName);
+      const mergedProfile = {
+        ...data,
+        fullName: data?.fullName || resolvedName,
+        avatarUrl: data?.avatarUrl || farmerAvatar || '',
+      };
+      setProfile(mergedProfile);
+      if (mergedProfile?.fullName) {
+        loadFarmerReviews(mergedProfile.fullName);
       }
     } catch {
-      // Fallback preview data matching Screen 10 in Figma
+      // Dynamic profile tailored to this specific farmer (e.g. Sunil Bandara)
       setProfile({
         id: farmerId,
-        fullName: farmerName || 'Kamal Gunawardana',
+        fullName: resolvedName,
         district: 'Nuwara Eliya',
         rating: 4.9,
         reviewsCount: 124,
-        bio: 'Kamal has been running his farm in Nuwara Eliya for over 15 years, specializing in organic highland vegetables. He uses eco-friendly pest control and natural spring water irrigation.',
-        mobileNumber: '+94 77 987 6543',
-        farmLocations: ['Highland Valley Farm, Hakgala Road, Nuwara Eliya'],
+        bio: `${resolvedName} runs commercial farm plots in Welimada / Nuwara Eliya, specializing in grade A fresh harvest and sustainable agriculture. Direct farm gate supplier on Famora.`,
+        mobileNumber: '+94 77 123 4567',
+        farmLocations: [`${resolvedName}'s Farm Plots, Welimada`],
         stats: {
           crops: 14,
-          experience: '15 Years',
+          experience: '12 Years',
           responseTime: '< 2 Hours',
         },
-        certifications: ['GAP Certified', 'USDA Organic', 'Highland Natural'],
+        certifications: ['GAP Certified', 'Good Agricultural Practices'],
+        avatarUrl: farmerAvatar || '',
       });
     }
 
     try {
-      const prods = await fetchProduceListings({ farmerId });
-      if (prods && prods.length > 0) {
-        setFeaturedProducts(prods);
+      const allProds = await fetchProduceListings();
+      const farmerProds = allProds.filter(
+        (p) =>
+          (farmerId && (p.farmerId === farmerId || String(p.farmerId).toLowerCase() === String(farmerId).toLowerCase())) ||
+          (resolvedName && p.farmerName && p.farmerName.toLowerCase().includes(resolvedName.toLowerCase()))
+      );
+      if (farmerProds && farmerProds.length > 0) {
+        setFeaturedProducts(farmerProds);
       } else {
-        // Fallback featured items
         setFeaturedProducts([
           {
-            id: 'kamal-p1',
-            title: 'Highland Fresh Carrots',
+            id: `${farmerId || 'farmer'}-p1`,
+            title: `Fresh Produce (${resolvedName})`,
             category: 'Vegetables',
-            description: 'Crisp, organically grown carrots from Nuwara Eliya springs.',
+            description: `Crisp, freshly harvested produce direct from ${resolvedName}'s farm plots.`,
             pricePerUnit: 280,
             currency: 'LKR',
             unit: 'kg',
             availableQuantity: 350,
             minimumOrderQuantity: 10,
             locationDistrict: 'Nuwara Eliya',
-            locationCity: 'Hakgala',
-            images: ['https://images.unsplash.com/photo-1598170845058-32b9d6a5c317?w=500'],
+            locationCity: 'Welimada',
+            images: ['https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?w=500'],
             farmerId: farmerId,
-            farmerName: 'Kamal Gunawardana',
-            farmerMobile: '+94 77 987 6543',
-            isOrganic: true,
-          },
-          {
-            id: 'kamal-p2',
-            title: 'Crisp Leeks (Organically Grown)',
-            category: 'Vegetables',
-            description: 'Highland leeks grown without synthetic pesticides.',
-            pricePerUnit: 310,
-            currency: 'LKR',
-            unit: 'kg',
-            availableQuantity: 200,
-            minimumOrderQuantity: 5,
-            locationDistrict: 'Nuwara Eliya',
-            locationCity: 'Hakgala',
-            images: ['https://images.unsplash.com/photo-1587049352847-4a222e784d38?w=500'],
-            farmerId: farmerId,
-            farmerName: 'Kamal Gunawardana',
-            farmerMobile: '+94 77 987 6543',
-            isOrganic: true,
-          },
-          {
-            id: 'kamal-p3',
-            title: 'Red Round Radish',
-            category: 'Vegetables',
-            description: 'Juicy organic red radish freshly pulled from garden beds.',
-            pricePerUnit: 190,
-            currency: 'LKR',
-            unit: 'kg',
-            availableQuantity: 180,
-            minimumOrderQuantity: 5,
-            locationDistrict: 'Nuwara Eliya',
-            locationCity: 'Hakgala',
-            images: ['https://images.unsplash.com/photo-1590779033100-9f60a05a013d?w=500'],
-            farmerId: farmerId,
-            farmerName: 'Kamal Gunawardana',
-            farmerMobile: '+94 77 987 6543',
+            farmerName: resolvedName,
+            farmerMobile: '+94 77 123 4567',
             isOrganic: true,
           },
         ]);
@@ -278,14 +253,19 @@ export function FarmerPublicProfileScreen({
 
         {/* Farmer Avatar */}
         <View style={styles.avatarWrapper}>
-          <Image
-            source={{
-              uri:
-                profile?.avatarUrl ||
-                'https://images.unsplash.com/photo-1544717305-2782549b5136?w=400',
-            }}
-            style={styles.avatarImage}
-          />
+          {(profile?.avatarUrl || farmerAvatar) ? (
+            <Image
+              source={{ uri: profile?.avatarUrl || farmerAvatar }}
+              style={styles.avatarImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+              <Text style={{ color: '#FFFFFF', fontSize: 30, fontWeight: '800' }}>
+                {(profile?.fullName || farmerName || 'F').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
           <View style={styles.onlineBadge} />
         </View>
       </View>
@@ -340,6 +320,7 @@ export function FarmerPublicProfileScreen({
               onOpenChat?.({
                 id: profile?.id || farmerId,
                 name: profile?.fullName || farmerName,
+                avatar: profile?.avatarUrl || farmerAvatar || '',
               })
             }>
             <Text style={styles.actionBtnIcon}>💬</Text>
@@ -728,6 +709,11 @@ const styles = StyleSheet.create({
     borderWidth: 3.5,
     borderColor: '#FFFFFF',
     backgroundColor: '#E2E8F0',
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#1E5E3A',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   onlineBadge: {
     position: 'absolute',

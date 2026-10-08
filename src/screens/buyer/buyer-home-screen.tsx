@@ -26,6 +26,7 @@ import { useCart } from '@/context/cart-context';
 import { MARKET_CATEGORIES } from './all-categories-screen';
 import { FilterModal, FilterState } from './filter-modal';
 import { LocationPermissionModal } from './location-permission-modal';
+import { FirestoreChatService } from '@/services/firestore-chat-service';
 
 interface BuyerHomeScreenProps {
   onOpenSearch: () => void;
@@ -50,35 +51,15 @@ interface BuyerHomeScreenProps {
   }) => void;
 }
 
-const NEARBY_FARMERS = [
-  {
-    id: 'f1',
-    name: 'Sunil Bandara',
-    location: 'Nuwara Eliya',
-    rating: 4.9,
-    orders: 142,
-    avatar: 'https://images.unsplash.com/photo-1544717302-de2939b7ef71?w=400&auto=format&fit=crop&q=80',
-    distance: '12 km',
-  },
-  {
-    id: 'f2',
-    name: 'Kamal Perera',
-    location: 'Kandy, Ampitiya',
-    rating: 4.8,
-    orders: 98,
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-    distance: '18 km',
-  },
-  {
-    id: 'f3',
-    name: 'Ranjith Silva',
-    location: 'Welimada',
-    rating: 4.9,
-    orders: 215,
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&auto=format&fit=crop&q=80',
-    distance: '24 km',
-  },
-];
+export interface NearbyFarmerItem {
+  id: string;
+  name: string;
+  location: string;
+  rating: number;
+  orders: number;
+  avatar: string;
+  distance: string;
+}
 
 export function BuyerHomeScreen({
   onOpenSearch,
@@ -106,6 +87,7 @@ export function BuyerHomeScreen({
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState('Colombo, Sri Lanka');
+  const [nearbyFarmers, setNearbyFarmers] = useState<NearbyFarmerItem[]>([]);
 
   const loadData = useCallback(async () => {
     try {
@@ -127,6 +109,87 @@ export function BuyerHomeScreen({
           else if (w._id) ids.add(w._id);
         });
         setWishlistedIds(ids);
+      }
+
+      // ── Dynamically populate real farmers directly from MongoDB & Firestore database ──
+      const farmerMap = new Map<string, NearbyFarmerItem>();
+      if (Array.isArray(items)) {
+        items.forEach((p) => {
+          const rawId = String(p.farmerId || (p as any)._id || '');
+          const farmerName = p.farmerName || 'Verified Farmer';
+          if (!rawId && !farmerName) return;
+          const key = (p.farmerId || farmerName).toString();
+          if (!farmerMap.has(key)) {
+            const loc = p.locationDistrict
+              ? `${p.locationCity ? p.locationCity + ', ' : ''}${p.locationDistrict}`
+              : 'Nuwara Eliya';
+            farmerMap.set(key, {
+              id: p.farmerId || rawId || key,
+              name: farmerName,
+              location: loc,
+              rating: 4.9,
+              orders: 140,
+              avatar: p.farmerAvatar || '',
+              distance: p.locationDistrict === currentUser?.district ? '8 km' : '14 km',
+            });
+          } else if (p.farmerAvatar && !farmerMap.get(key)!.avatar) {
+            farmerMap.get(key)!.avatar = p.farmerAvatar;
+          }
+        });
+      }
+
+      try {
+        const platformFarmers = await FirestoreChatService.fetchPlatformUsers('farmer');
+        platformFarmers.forEach((ff) => {
+          const key = ff.id || ff.fullName;
+          if (!farmerMap.has(key)) {
+            farmerMap.set(key, {
+              id: ff.id,
+              name: ff.fullName,
+              location: ff.district ? `${ff.district}, Sri Lanka` : 'Central Province',
+              rating: 4.9,
+              orders: 96,
+              avatar: ff.avatarUrl || '',
+              distance: '12 km',
+            });
+          } else if (ff.avatarUrl) {
+            farmerMap.get(key)!.avatar = ff.avatarUrl;
+          }
+        });
+      } catch {}
+
+      if (farmerMap.size > 0) {
+        setNearbyFarmers(Array.from(farmerMap.values()));
+      } else {
+        setNearbyFarmers([
+          {
+            id: 'Sunil Bandara',
+            name: 'Sunil Bandara',
+            location: 'Welimada, Nuwara Eliya',
+            rating: 4.9,
+            orders: 142,
+            avatar: '',
+            distance: '12 km',
+          },
+          {
+            id: 'Kamal Gunawardana',
+            name: 'Kamal Gunawardana',
+            location: 'Kandy, Ampitiya',
+            rating: 4.8,
+            orders: 98,
+            avatar: '',
+            distance: '18 km',
+          },
+          {
+            id: 'Ranjith Silva',
+            name: 'Ranjith Silva',
+            location: 'Welimada',
+            rating: 4.9,
+            orders: 215,
+            avatar: '',
+            distance: '24 km',
+          },
+        ]);
       }
     } catch (err) {
       console.error('[BuyerHomeScreen] Failed to load data from MongoDB:', err);
@@ -525,7 +588,7 @@ export function BuyerHomeScreen({
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.farmersScroll}>
-            {NEARBY_FARMERS.map((farmer) => (
+            {nearbyFarmers.map((farmer) => (
               <Pressable
                 key={farmer.id}
                 style={styles.farmerCard}
@@ -536,11 +599,19 @@ export function BuyerHomeScreen({
                     onOpenFarmsMap();
                   }
                 }}>
-                <Image
-                  source={{ uri: farmer.avatar }}
-                  style={styles.farmerAvatar}
-                  contentFit="cover"
-                />
+                {farmer.avatar ? (
+                  <Image
+                    source={{ uri: farmer.avatar }}
+                    style={styles.farmerAvatar}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={[styles.farmerAvatar, styles.farmerAvatarPlaceholder]}>
+                    <Text style={styles.farmerAvatarInitials}>
+                      {farmer.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
                 <Text style={styles.farmerName}>{farmer.name}</Text>
                 <Text style={styles.farmerDist}>{farmer.location} • {farmer.distance}</Text>
                 <View style={styles.farmerRatingRow}>
@@ -1076,6 +1147,16 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     backgroundColor: '#E2E8F0',
     marginBottom: 8,
+  },
+  farmerAvatarPlaceholder: {
+    backgroundColor: '#1E5E3A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  farmerAvatarInitials: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 20,
   },
   farmerName: {
     fontSize: 13,

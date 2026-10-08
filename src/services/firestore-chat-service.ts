@@ -254,6 +254,16 @@ export const FirestoreChatService = {
       docExists = false;
     }
 
+    let otherAvatar = params.otherUserAvatar || '';
+    if (!otherAvatar) {
+      try {
+        const otherUserSnap = await getDoc(doc(db, 'users', params.otherUserId));
+        if (otherUserSnap.exists() && otherUserSnap.data()?.avatarUrl) {
+          otherAvatar = otherUserSnap.data().avatarUrl;
+        }
+      } catch {}
+    }
+
     if (!docExists) {
       const now = new Date().toISOString();
       const convData: Omit<FirestoreConversation, 'id'> = {
@@ -264,7 +274,7 @@ export const FirestoreChatService = {
         },
         participantAvatars: {
           [myId]: myAvatar,
-          [params.otherUserId]: params.otherUserAvatar || '',
+          [params.otherUserId]: otherAvatar,
         },
         participantRoles: {
           [myId]: myRole,
@@ -289,7 +299,8 @@ export const FirestoreChatService = {
       if (params.productTitle) updates.productTitle = params.productTitle;
       if (params.productImage) updates.productImage = params.productImage;
       if (params.otherUserName) updates[`participantNames.${params.otherUserId}`] = params.otherUserName;
-      if (params.otherUserAvatar) updates[`participantAvatars.${params.otherUserId}`] = params.otherUserAvatar;
+      if (otherAvatar) updates[`participantAvatars.${params.otherUserId}`] = otherAvatar;
+      if (myAvatar) updates[`participantAvatars.${myId}`] = myAvatar;
       await setDoc(convRef, updates, { merge: true });
     }
 

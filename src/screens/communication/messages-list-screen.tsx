@@ -27,7 +27,9 @@ import {
   FirestoreConversation,
   PlatformUserDirectoryItem,
 } from '@/services/firestore-chat-service';
-import { getStoredUser, ApiUser } from '@/services/api';
+import { getStoredUser, ApiUser, fetchProduceListings } from '@/services/api';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 
 interface MessagesListScreenProps {
   onBack?: () => void;
@@ -52,6 +54,7 @@ export function MessagesListScreen({
   const [conversations, setConversations] = useState<FirestoreConversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [dbAvatars, setDbAvatars] = useState<Record<string, string>>({});
 
   // New Chat Modal with real platform farmers/buyers
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -89,12 +92,43 @@ export function MessagesListScreen({
     // 2. Sync self into Firestore directory non-blocking
     FirestoreChatService.syncUserToFirestore(user);
 
-    // 3. Real-time Firestore listener with automatic JS sorting & auto-caching
+    // 3. Load live database avatars for registered platform users & farmers
+    loadDatabaseAvatars();
+
+    // 4. Real-time Firestore listener with automatic JS sorting & auto-caching
     const unsub = FirestoreChatService.listenToConversations(myIds, (convs) => {
       setConversations(convs);
       setLoading(false);
     });
     unsubscribeRef.current = unsub;
+  };
+
+  const loadDatabaseAvatars = async () => {
+    const avatarMap: Record<string, string> = {};
+    try {
+      // 1. Fetch real avatars from Firestore users directory
+      const usersSnap = await getDocs(collection(db, 'users'));
+      usersSnap.forEach((d) => {
+        const u = d.data();
+        if (u.avatarUrl) {
+          avatarMap[d.id] = u.avatarUrl;
+          if (u.fullName) avatarMap[u.fullName.toLowerCase().trim()] = u.avatarUrl;
+        }
+      });
+    } catch {}
+
+    try {
+      // 2. Fetch real avatars from MongoDB produce listings
+      const prods = await fetchProduceListings();
+      prods.forEach((p) => {
+        if (p.farmerAvatar) {
+          if (p.farmerId) avatarMap[p.farmerId] = p.farmerAvatar;
+          if (p.farmerName) avatarMap[p.farmerName.toLowerCase().trim()] = p.farmerAvatar;
+        }
+      });
+    } catch {}
+
+    setDbAvatars(avatarMap);
   };
 
   const handleOpenNewChatModal = async () => {
@@ -157,6 +191,9 @@ export function MessagesListScreen({
 
   const getOtherAvatar = (conv: FirestoreConversation): string => {
     const otherId = getOtherUserId(conv);
+    const otherName = getOtherName(conv).toLowerCase().trim();
+    if (dbAvatars[otherId]) return dbAvatars[otherId];
+    if (dbAvatars[otherName]) return dbAvatars[otherName];
     return conv.participantAvatars?.[otherId] || '';
   };
 

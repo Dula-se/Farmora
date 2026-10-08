@@ -600,8 +600,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             farmerAvatar={selectedFarmer.avatar}
             onBack={() => setCurrentView('home')}
             onSelectProduce={handleSelectProduct}
-            onOpenChat={(f) => {
-              handleStartChatWithFarmer(f.id, f.name);
+            onOpenChat={(f: any) => {
+              handleStartChatWithFarmer(f.id, f.name, null, f.avatar || selectedFarmer.avatar);
             }}
             onRateFarmer={(f) => {
               setRateOriginView('farmer-public-profile');

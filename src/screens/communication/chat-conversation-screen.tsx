@@ -94,6 +94,7 @@ export function ChatConversationScreen({
   const [sending, setSending] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showActionSheet, setShowActionSheet] = useState(false);
+  const [liveOtherAvatar, setLiveOtherAvatar] = useState<string>('');
 
   // Edit & Delete message actions
   const [selectedMsgForAction, setSelectedMsgForAction] = useState<FirestoreMessage | null>(null);
@@ -150,11 +151,21 @@ export function ChatConversationScreen({
     const user = await getStoredUser();
     setCurrentUser(user);
 
-    // 2. Fetch conversation metadata non-blocking in background
+    // 2. Fetch conversation metadata & other user's real database avatar non-blocking in background
     getDoc(doc(db, 'conversations', conversationId))
-      .then((convSnap) => {
+      .then(async (convSnap) => {
         if (convSnap.exists()) {
-          setConvMeta({ id: convSnap.id, ...(convSnap.data() as any) });
+          const cData = convSnap.data() as any;
+          setConvMeta({ id: convSnap.id, ...cData });
+          const targetUid = otherUserId || cData.participants?.find((p: string) => p !== (user?.id || user?._id));
+          if (targetUid) {
+            try {
+              const uSnap = await getDoc(doc(db, 'users', targetUid));
+              if (uSnap.exists() && uSnap.data()?.avatarUrl) {
+                setLiveOtherAvatar(uSnap.data().avatarUrl);
+              }
+            } catch {}
+          }
         }
       })
       .catch((e) => {
@@ -685,6 +696,7 @@ export function ChatConversationScreen({
     otherUserId ||
     (convMeta?.participants?.find((p) => p !== myId) || '');
   const participantAvatar =
+    liveOtherAvatar ||
     (actualOtherUserId && convMeta?.participantAvatars?.[actualOtherUserId]) ||
     otherUserAvatar ||
     '';
