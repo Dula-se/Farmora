@@ -76,16 +76,6 @@ export function StripePaymentModal({
     setErrorMsg(null);
   };
 
-  // Quick fill Stripe test card (4242 ...)
-  const handleFillTestCard = () => {
-    setCardNumber('4242 4242 4242 4242');
-    setExpiry('12/28');
-    setCvc('123');
-    setCardHolder('Sunil Dissanayake');
-    setPostalCode('00100');
-    setErrorMsg(null);
-  };
-
   const handlePay = async () => {
     const cleanNum = cardNumber.replace(/\s+/g, '');
     if (cleanNum.length < 16) {
@@ -249,12 +239,11 @@ export function StripePaymentModal({
             <View style={styles.amountCard}>
               <View>
                 <Text style={styles.amountLabel}>Total to Pay</Text>
-                <Text style={styles.amountValue}>Rs. {amount.toLocaleString()}</Text>
+                <Text style={styles.amountValue}>Rs. {amount.toLocaleString()} LKR</Text>
               </View>
-
-              <Pressable style={styles.testCardFillBtn} onPress={handleFillTestCard}>
-                <Text style={styles.testCardFillBtnText}>Auto-Fill Test Card</Text>
-              </Pressable>
+              <View style={styles.secureBadgePill}>
+                <Text style={styles.secureBadgePillText}>🔒 256-Bit SSL</Text>
+              </View>
             </View>
 
             {/* Error Banner */}
@@ -490,16 +479,18 @@ const styles = StyleSheet.create({
     color: '#14532D',
     marginTop: 2,
   },
-  testCardFillBtn: {
-    backgroundColor: '#22C55E',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  secureBadgePill: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
   },
-  testCardFillBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
+  secureBadgePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803D',
   },
   errorBanner: {
     flexDirection: 'row',

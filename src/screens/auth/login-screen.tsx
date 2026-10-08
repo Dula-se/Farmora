@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { loginWithApi, ApiUser } from '@/services/api';
 import { GoogleAuthModal } from '@/services/google-auth-modal';
 
@@ -62,18 +62,6 @@ export function LoginScreen({
     }
   };
 
-  const fillDemoFarmer = () => {
-    setIdentifier('0771234567');
-    setPassword('Farmora@2026');
-    setErrorMessage(null);
-  };
-
-  const fillDemoBuyer = () => {
-    setIdentifier('0779876543');
-    setPassword('Farmora@2026');
-    setErrorMessage(null);
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#FAFBF9" />
@@ -110,19 +98,6 @@ export function LoginScreen({
           <Text style={styles.subtitle}>
             Log in to continue your fresh trading experience.
           </Text>
-        </View>
-
-        {/* Demo Credentials Quick-Fill helper */}
-        <View style={styles.demoBox}>
-          <Text style={styles.demoLabel}>⚡ Quick Fill Demo Accounts (MongoDB):</Text>
-          <View style={styles.demoPillsRow}>
-            <Pressable style={styles.demoPill} onPress={fillDemoFarmer}>
-              <Text style={styles.demoPillText}>🌾 Sunil (Farmer)</Text>
-            </Pressable>
-            <Pressable style={styles.demoPill} onPress={fillDemoBuyer}>
-              <Text style={styles.demoPillText}>🏬 Keells (Buyer)</Text>
-            </Pressable>
-          </View>
         </View>
 
         {/* Error Alert */}
@@ -172,8 +147,19 @@ export function LoginScreen({
               <Pressable
                 onPress={() => setShowPassword(!showPassword)}
                 hitSlop={10}
-                style={styles.eyeButton}>
-                <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁️'}</Text>
+                style={styles.eyeButton}
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                {showPassword ? (
+                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#0F172A" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <Circle cx={12} cy={12} r={3} />
+                  </Svg>
+                ) : (
+                  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <Path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+                    <Path d="M1 1l22 22" />
+                  </Svg>
+                )}
               </Pressable>
             </View>
           </View>
@@ -368,37 +354,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748B',
     lineHeight: 20,
-  },
-  demoBox: {
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 16,
-  },
-  demoLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#065F46',
-    marginBottom: 8,
-  },
-  demoPillsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  demoPill: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#6EE7B7',
-  },
-  demoPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#047857',
   },
   errorBanner: {
     backgroundColor: '#FEF2F2',
