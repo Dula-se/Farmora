@@ -1,22 +1,16 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { ApiUser, getAuthToken } from './api';
-import {
-  signInWithRealGoogleAccount,
-  authenticateRealGmailWithFirebase,
-  isExpoGo,
-} from './firebase-google-auth';
+import { signInWithRealGoogleAccount } from './firebase-google-auth';
 
 export interface GoogleAuthModalProps {
   visible: boolean;
@@ -34,14 +28,9 @@ export function GoogleAuthModal({
   onSuccess,
 }: GoogleAuthModalProps) {
   const [loading, setLoading] = useState(false);
-  const [realGmail, setRealGmail] = useState('chanukadushan1030@gmail.com');
-  const [realPassword, setRealPassword] = useState('');
-  const [fullName, setFullName] = useState('Chanuka Dushan');
-  // In Expo Go, default to direct Gmail entry to prevent TurboModule crashes
-  const [useOAuthPrompt, setUseOAuthPrompt] = useState(!isExpoGo);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 1. Launch Real Google Sign-In (Web popup or Native Play Services sheet)
+  // Launch Real Google Sign-In (Web popup or Native Play Services sheet)
   const handleRealGoogleSignIn = async () => {
     setLoading(true);
     setErrorMsg('');
@@ -56,29 +45,6 @@ export function GoogleAuthModal({
     } catch (err: any) {
       console.warn('[Google Auth] Sign-in notice:', err.message);
       setErrorMsg(err.message || 'Could not complete Google sign-in.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 2. Direct Real Google Account Sync (for testing in Expo Go)
-  const handleDirectGoogleSync = async () => {
-    setLoading(true);
-    setErrorMsg('');
-    try {
-      const { user } = await authenticateRealGmailWithFirebase({
-        email: realGmail.trim(),
-        fullName: fullName.trim() || undefined,
-        accountType,
-        buyerType,
-      });
-
-      const token = (await getAuthToken()) || '';
-      onSuccess(user, token);
-      onClose();
-    } catch (err: any) {
-      console.error('[Google Auth] Firebase Sync error:', err);
-      setErrorMsg(err.message || 'Could not authenticate Google account.');
     } finally {
       setLoading(false);
     }
@@ -127,7 +93,7 @@ export function GoogleAuthModal({
           {loading ? (
             <View style={styles.loaderBox}>
               <ActivityIndicator size="large" color="#2E7D32" />
-              <Text style={styles.loaderText}>Authenticating with Firebase & Google...</Text>
+              <Text style={styles.loaderText}>Authenticating with Google...</Text>
             </View>
           ) : (
             <View style={styles.contentContainer}>
@@ -144,45 +110,9 @@ export function GoogleAuthModal({
                 <Text style={styles.primaryOAuthBtnText}>
                   {Platform.OS === 'web'
                     ? 'Sign in with Google Popup'
-                    : 'Open Google Account Picker'}
+                    : 'Sign in with Google'}
                 </Text>
               </Pressable>
-
-              {/* Verified Real Gmail Quick-Sign-In Tile */}
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or continue with verified account</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.userTile,
-                  pressed && styles.userTilePressed,
-                ]}
-                onPress={handleDirectGoogleSync}>
-                <View style={styles.avatarCircle}>
-                  <Text style={styles.avatarLetter}>C</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.tileName}>Chanuka Dushan</Text>
-                  <Text style={styles.tileEmail}>{realGmail}</Text>
-                </View>
-                <View style={styles.googleVerifiedBadge}>
-                  <Text style={styles.googleVerifiedText}>Google</Text>
-                </View>
-              </Pressable>
-
-              {isExpoGo && Platform.OS !== 'web' && (
-                <View style={styles.expoNoticeBox}>
-                  <Text style={styles.expoNoticeTitle}>💡 Expo Go Note:</Text>
-                  <Text style={styles.expoNoticeDesc}>
-                    Google's native Play Services sheet requires an Android build (
-                    <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>). In Expo Go, tap the account above to sign in, or test on Web (
-                    <Text style={{ fontWeight: '700' }}>npm run web</Text>) for the live Google popup!
-                  </Text>
-                </View>
-              )}
             </View>
           )}
 
@@ -304,91 +234,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 4,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E2E8F0',
-  },
-  dividerText: {
-    paddingHorizontal: 10,
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '600',
-  },
-  userTile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    borderRadius: 16,
-    padding: 12,
-    gap: 12,
-  },
-  userTilePressed: {
-    backgroundColor: '#F1F5F9',
-    borderColor: '#CBD5E1',
-  },
-  avatarCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#1A73E8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarLetter: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  tileName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  tileEmail: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  googleVerifiedBadge: {
-    backgroundColor: '#E8F0FE',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D2E3FC',
-  },
-  googleVerifiedText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1A73E8',
-  },
-  expoNoticeBox: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    marginTop: 4,
-  },
-  expoNoticeTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#1E40AF',
-    marginBottom: 4,
-  },
-  expoNoticeDesc: {
-    fontSize: 11,
-    color: '#1E3A8A',
-    lineHeight: 16,
   },
   closeBtn: {
     marginTop: 12,
