@@ -624,7 +624,22 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             await FirestoreChatService.sendMessage({
               conversationId: activeChatMeta.conversationId,
               currentUser: user,
-              text: `📅 Scheduled Farm Inspection confirmed for ${details.date} at ${details.time}`,
+              text: `📅 Scheduled Farm Inspection confirmed via Cal.com for ${details.date} at ${details.time}`,
+              callInvitation: {
+                callId: details.calBookingUid || `sched_${Date.now()}`,
+                meetingUrl: details.meetingUrl,
+                hostName: user.fullName || 'You',
+                hostAvatar: user.avatarUrl,
+                mode: 'video',
+                type: 'scheduled',
+                status: 'scheduled',
+                scheduledDate: details.date,
+                scheduledTime: details.time,
+                provider: 'cal.com',
+                calBookingUid: details.calBookingUid,
+                notes: details.note,
+                inspectionFocus: details.inspectionFocus,
+              },
             });
           }
         }}

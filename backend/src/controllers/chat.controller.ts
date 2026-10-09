@@ -280,6 +280,7 @@ export class ChatController {
         voiceUrl: m.voiceUrl,
         voiceBase64: m.voiceBase64,
         offer: m.offer,
+        callInvitation: m.callInvitation,
         createdAt: m.createdAt.toISOString(),
       }));
 
@@ -308,6 +309,7 @@ export class ChatController {
         voiceUrl,
         voiceBase64,
         offer,
+        callInvitation,
         participants,
       } = req.body;
 
@@ -331,11 +333,13 @@ export class ChatController {
         voiceUrl,
         voiceBase64,
         offer,
+        callInvitation,
       });
 
       // Update conversation lastMessage & auto-upsert conversation doc
       let lastText = text || '';
-      if (offer) lastText = `Offer: ${offer.quantity} ${offer.unit} at Rs. ${offer.pricePerUnit}`;
+      if (callInvitation) lastText = callInvitation.type === 'scheduled' ? `📅 Video Inspection Scheduled` : '📹 Video Call Invitation';
+      else if (offer) lastText = `Offer: ${offer.quantity} ${offer.unit} at Rs. ${offer.pricePerUnit}`;
       else if (isVoiceNote) lastText = '🎤 Voice note';
       else if (imageUri) lastText = '📷 Photo';
 

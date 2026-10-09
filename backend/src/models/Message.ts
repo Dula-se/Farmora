@@ -14,6 +14,7 @@ export interface IMessage extends Document {
   voiceUrl?: string;
   voiceBase64?: string;
   offer?: any;
+  callInvitation?: any;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,6 +34,7 @@ const MessageSchema = new Schema<IMessage>(
     voiceUrl: { type: String },
     voiceBase64: { type: String },
     offer: { type: Schema.Types.Mixed },
+    callInvitation: { type: Schema.Types.Mixed },
   },
   { timestamps: true }
 );

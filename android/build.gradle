@@ -24,6 +24,14 @@ allprojects {
   }
 }
 
+subprojects {
+  afterEvaluate { project ->
+    project.tasks.matching { it.name.contains("extractReleaseAnnotations") || it.name.contains("extractDebugAnnotations") }.configureEach {
+      enabled = false
+    }
+  }
+}
+
 apply plugin: "expo-root-project"
 rootProject.ext.ndkVersion = "27.0.12077973"
 apply plugin: "com.facebook.react.rootproject"

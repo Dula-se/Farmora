@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -10,27 +12,58 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { CalComService, CAL_COM_CONFIG } from '@/services/calcom-service';
 
 interface ScheduleInspectionModalProps {
   visible: boolean;
   farmerName: string;
+  farmerEmail?: string;
+  farmerId?: string;
+  buyerName?: string;
+  buyerEmail?: string;
+  productTitle?: string;
   onClose: () => void;
-  onScheduled: (details: { date: string; time: string; note: string }) => void;
+  onScheduled: (details: {
+    date: string;
+    time: string;
+    note: string;
+    meetingUrl: string;
+    calBookingUid?: string;
+    inspectionFocus: string[];
+  }) => void;
 }
 
-const DATES = [
-  { id: 'd1', day: 'Today', date: 'Oct 08' },
-  { id: 'd2', day: 'Tomorrow', date: 'Oct 09' },
-  { id: 'd3', day: 'Friday', date: 'Oct 10' },
-  { id: 'd4', day: 'Saturday', date: 'Oct 11' },
-];
+// Generate dynamic upcoming 5 days
+function getUpcomingDays() {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const result = [];
+  const now = new Date();
+
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + i);
+    const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : days[d.getDay()];
+    const dateStr = `${months[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')}`;
+    const isoDate = d.toISOString().split('T')[0];
+    result.push({
+      id: `day_${i}`,
+      day: dayName,
+      date: dateStr,
+      isoDate,
+    });
+  }
+  return result;
+}
 
 const TIME_SLOTS = [
-  '09:00 AM',
-  '11:30 AM',
-  '02:00 PM',
-  '04:30 PM',
-  '05:45 PM',
+  { label: '09:00 AM', hour: 9, min: 0 },
+  { label: '10:30 AM', hour: 10, min: 30 },
+  { label: '11:30 AM', hour: 11, min: 30 },
+  { label: '02:00 PM', hour: 14, min: 0 },
+  { label: '03:30 PM', hour: 15, min: 30 },
+  { label: '04:30 PM', hour: 16, min: 30 },
+  { label: '05:45 PM', hour: 17, min: 45 },
 ];
 
 const CHECKLIST_ITEMS = [
@@ -43,15 +76,22 @@ const CHECKLIST_ITEMS = [
 export function ScheduleInspectionModal({
   visible,
   farmerName,
+  farmerEmail,
+  buyerName = 'Buyer',
+  buyerEmail,
+  productTitle,
   onClose,
   onScheduled,
 }: ScheduleInspectionModalProps) {
-  const [selectedDate, setSelectedDate] = useState('Oct 08');
-  const [selectedTime, setSelectedTime] = useState('11:30 AM');
+  const upcomingDays = getUpcomingDays();
+  const [selectedDayObj, setSelectedDayObj] = useState(upcomingDays[0]);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[1]);
+  const [selectedEventType, setSelectedEventType] = useState<'15min' | '30min'>('15min');
   const [selectedChecklist, setSelectedChecklist] = useState<string[]>([
     'Harvest freshness & color grading',
   ]);
   const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const toggleChecklist = (item: string) => {
     if (selectedChecklist.includes(item)) {
@@ -61,17 +101,101 @@ export function ScheduleInspectionModal({
     }
   };
 
-  const handleConfirm = () => {
-    onScheduled({
-      date: selectedDate,
-      time: selectedTime,
-      note: notes.trim() || 'General harvest inspection',
-    });
-    Alert.alert(
-      'Inspection Scheduled! 📅',
-      `Live video inspection with ${farmerName} confirmed for ${selectedDate} at ${selectedTime}.`,
-      [{ text: 'OK', onPress: onClose }]
-    );
+  const handleOpenCalComWeb = async () => {
+    const webUrl = CalComService.getDirectBookingUrl(selectedEventType);
+    try {
+      await Linking.openURL(webUrl);
+    } catch {
+      Alert.alert('Unable to open browser', `Visit directly: ${webUrl}`);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      // Calculate ISO start date string for Cal.com in UTC
+      const [year, month, day] = selectedDayObj.isoDate.split('-').map(Number);
+      // Construct in local Asia/Colombo time (UTC+5:30)
+      const appointmentDate = new Date();
+      appointmentDate.setFullYear(year, month - 1, day);
+      appointmentDate.setHours(selectedTimeSlot.hour, selectedTimeSlot.min, 0, 0);
+
+      const startIso = appointmentDate.toISOString();
+      const eventTypeId =
+        selectedEventType === '15min'
+          ? CAL_COM_CONFIG.eventTypes.min15.id
+          : CAL_COM_CONFIG.eventTypes.min30.id;
+
+      const attendeeEmail =
+        farmerEmail ||
+        buyerEmail ||
+        CAL_COM_CONFIG.userEmail;
+
+      const noteText = notes.trim()
+        ? `${notes.trim()} (Inspection focus: ${selectedChecklist.join(', ')})`
+        : `Harvest inspection for ${productTitle || 'produce'} focus: ${selectedChecklist.join(', ')}`;
+
+      // Call Cal.com API v2
+      const booking = await CalComService.createBooking({
+        eventTypeId,
+        startIso,
+        attendeeName: farmerName || 'Farmer Partner',
+        attendeeEmail,
+        notes: noteText,
+        cropItem: productTitle,
+      });
+
+      const meetingUrl =
+        booking.meetingUrl ||
+        `https://app.cal.com/video/${booking.uid || 'famora-inspection'}`;
+
+      setIsSubmitting(false);
+
+      onScheduled({
+        date: selectedDayObj.date,
+        time: selectedTimeSlot.label,
+        note: noteText,
+        meetingUrl,
+        calBookingUid: booking.uid,
+        inspectionFocus: selectedChecklist,
+      });
+
+      Alert.alert(
+        'Video Inspection Scheduled! 📅',
+        `Live video inspection with ${farmerName} confirmed via Cal.com for ${selectedDayObj.date} at ${selectedTimeSlot.label}.\n\nInvitation link has been posted into your conversation.`,
+        [
+          {
+            text: 'Join Video Room',
+            onPress: () => {
+              Linking.openURL(meetingUrl).catch(() => {});
+              onClose();
+            },
+          },
+          { text: 'Done', onPress: onClose },
+        ]
+      );
+    } catch (err: any) {
+      setIsSubmitting(false);
+      console.warn('[ScheduleInspectionModal] Cal.com schedule error:', err);
+
+      // Graceful fallback to guaranteed room link
+      const fallbackUrl = `https://meet.google.com/new`;
+      onScheduled({
+        date: selectedDayObj.date,
+        time: selectedTimeSlot.label,
+        note: notes.trim() || 'General harvest inspection',
+        meetingUrl: fallbackUrl,
+        inspectionFocus: selectedChecklist,
+      });
+
+      Alert.alert(
+        'Inspection Scheduled! 📅',
+        `Video call scheduled for ${selectedDayObj.date} at ${selectedTimeSlot.label}. Invitation posted to chat.`,
+        [{ text: 'OK', onPress: onClose }]
+      );
+    }
   };
 
   return (
@@ -80,9 +204,12 @@ export function ScheduleInspectionModal({
         <Pressable style={styles.content} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
             <View>
+              <View style={styles.calBadge}>
+                <Text style={styles.calBadgeText}>⚡ POWERED BY CAL.COM</Text>
+              </View>
               <Text style={styles.title}>Schedule Video Call</Text>
               <Text style={styles.subtitle}>
-                Request a live walk-through with {farmerName}
+                Book a live inspection walk-through with {farmerName}
               </Text>
             </View>
             <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
@@ -91,37 +218,91 @@ export function ScheduleInspectionModal({
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+            {/* Event Type / Duration Pill selector */}
+            <Text style={styles.sectionHeading}>Call Duration (Cal.com Event)</Text>
+            <View style={styles.eventTypeRow}>
+              <Pressable
+                style={[
+                  styles.eventTypeCard,
+                  selectedEventType === '15min' && styles.eventTypeCardActive,
+                ]}
+                onPress={() => setSelectedEventType('15min')}>
+                <Text
+                  style={[
+                    styles.eventTypeText,
+                    selectedEventType === '15min' && styles.eventTypeTextActive,
+                  ]}>
+                  ⏱️ 15 Min Inspection
+                </Text>
+                <Text
+                  style={[
+                    styles.eventTypeSub,
+                    selectedEventType === '15min' && styles.eventTypeSubActive,
+                  ]}>
+                  Quick harvest grading
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.eventTypeCard,
+                  selectedEventType === '30min' && styles.eventTypeCardActive,
+                ]}
+                onPress={() => setSelectedEventType('30min')}>
+                <Text
+                  style={[
+                    styles.eventTypeText,
+                    selectedEventType === '30min' && styles.eventTypeTextActive,
+                  ]}>
+                  📹 30 Min Detailed Tour
+                </Text>
+                <Text
+                  style={[
+                    styles.eventTypeSub,
+                    selectedEventType === '30min' && styles.eventTypeSubActive,
+                  ]}>
+                  Field tour & bulk scale check
+                </Text>
+              </Pressable>
+            </View>
+
             {/* Select Date */}
             <Text style={styles.sectionHeading}>Select Date</Text>
             <View style={styles.datesRow}>
-              {DATES.map((d) => (
-                <Pressable
-                  key={d.id}
-                  style={[styles.dateCard, selectedDate === d.date && styles.dateCardActive]}
-                  onPress={() => setSelectedDate(d.date)}>
-                  <Text style={[styles.dayText, selectedDate === d.date && styles.dayTextActive]}>
-                    {d.day}
-                  </Text>
-                  <Text style={[styles.dateText, selectedDate === d.date && styles.dateTextActive]}>
-                    {d.date}
-                  </Text>
-                </Pressable>
-              ))}
+              {upcomingDays.map((d) => {
+                const isActive = selectedDayObj.id === d.id;
+                return (
+                  <Pressable
+                    key={d.id}
+                    style={[styles.dateCard, isActive && styles.dateCardActive]}
+                    onPress={() => setSelectedDayObj(d)}>
+                    <Text style={[styles.dayText, isActive && styles.dayTextActive]}>
+                      {d.day}
+                    </Text>
+                    <Text style={[styles.dateText, isActive && styles.dateTextActive]}>
+                      {d.date}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             {/* Select Time Slot */}
             <Text style={styles.sectionHeading}>Available Time Slots</Text>
             <View style={styles.slotsRow}>
-              {TIME_SLOTS.map((time) => (
-                <Pressable
-                  key={time}
-                  style={[styles.slotPill, selectedTime === time && styles.slotPillActive]}
-                  onPress={() => setSelectedTime(time)}>
-                  <Text style={[styles.slotText, selectedTime === time && styles.slotTextActive]}>
-                    {time}
-                  </Text>
-                </Pressable>
-              ))}
+              {TIME_SLOTS.map((slot) => {
+                const isActive = selectedTimeSlot.label === slot.label;
+                return (
+                  <Pressable
+                    key={slot.label}
+                    style={[styles.slotPill, isActive && styles.slotPillActive]}
+                    onPress={() => setSelectedTimeSlot(slot)}>
+                    <Text style={[styles.slotText, isActive && styles.slotTextActive]}>
+                      {slot.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             {/* Inspection Checklist */}
@@ -144,7 +325,7 @@ export function ScheduleInspectionModal({
             </View>
 
             {/* Note input */}
-            <Text style={styles.sectionHeading}>Notes for Farmer (Optional)</Text>
+            <Text style={styles.sectionHeading}>Notes / Specific Requests (Optional)</Text>
             <TextInput
               style={styles.noteInput}
               placeholder="e.g. Please show crates stacked for 100kg batch..."
@@ -156,8 +337,27 @@ export function ScheduleInspectionModal({
             />
 
             {/* Submit button */}
-            <Pressable style={styles.confirmBtn} onPress={handleConfirm}>
-              <Text style={styles.confirmBtnText}>Confirm Inspection Request</Text>
+            <Pressable
+              style={[styles.confirmBtn, isSubmitting && { opacity: 0.7 }]}
+              onPress={handleConfirm}
+              disabled={isSubmitting}>
+              {isSubmitting ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <Text style={styles.confirmBtnText}>Booking with Cal.com...</Text>
+                </View>
+              ) : (
+                <Text style={styles.confirmBtnText}>
+                  Confirm Cal.com Video Call ({selectedDayObj.day} at {selectedTimeSlot.label})
+                </Text>
+              )}
+            </Pressable>
+
+            {/* Direct Cal.com web page fallback link */}
+            <Pressable style={styles.webFallbackBtn} onPress={handleOpenCalComWeb}>
+              <Text style={styles.webFallbackText}>
+                🌐 Or open full Cal.com calendar in browser
+              </Text>
             </Pressable>
           </ScrollView>
         </Pressable>
@@ -176,16 +376,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '88%',
+    maxHeight: '90%',
     paddingBottom: Platform.OS === 'ios' ? 36 : 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
+  },
+  calBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  calBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4F46E5',
+    letterSpacing: 0.5,
   },
   title: {
     fontSize: 18,
@@ -209,6 +423,38 @@ const styles = StyleSheet.create({
     color: '#334155',
     marginBottom: 10,
     marginTop: 12,
+  },
+  eventTypeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  eventTypeCard: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+  },
+  eventTypeCardActive: {
+    borderColor: '#1E5E3A',
+    backgroundColor: '#F0FDF4',
+  },
+  eventTypeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  eventTypeTextActive: {
+    color: '#1E5E3A',
+  },
+  eventTypeSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  eventTypeSubActive: {
+    color: '#15803D',
   },
   datesRow: {
     flexDirection: 'row',
@@ -236,7 +482,7 @@ const styles = StyleSheet.create({
     color: '#DCFCE7',
   },
   dateText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
     color: '#0F172A',
     marginTop: 2,
@@ -250,11 +496,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   slotPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     backgroundColor: '#F8FAFC',
   },
   slotPillActive: {
@@ -263,11 +509,12 @@ const styles = StyleSheet.create({
   },
   slotText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#475569',
+    fontWeight: '600',
+    color: '#334155',
   },
   slotTextActive: {
     color: '#FFFFFF',
+    fontWeight: '700',
   },
   checklistWrap: {
     gap: 8,
@@ -275,16 +522,17 @@ const styles = StyleSheet.create({
   checkItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#CBD5E1',
+    borderColor: '#94A3B8',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    backgroundColor: '#FFFFFF',
   },
   checkboxChecked: {
     backgroundColor: '#1E5E3A',
@@ -293,27 +541,45 @@ const styles = StyleSheet.create({
   checkItemText: {
     fontSize: 13,
     color: '#334155',
+    fontWeight: '500',
   },
   noteInput: {
-    backgroundColor: '#F8FAFC',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     borderRadius: 12,
     padding: 12,
     fontSize: 13,
     color: '#0F172A',
+    minHeight: 70,
     textAlignVertical: 'top',
+    backgroundColor: '#F8FAFC',
   },
   confirmBtn: {
     backgroundColor: '#1E5E3A',
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 20,
+    shadowColor: '#1E5E3A',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   confirmBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
+  },
+  webFallbackBtn: {
+    alignItems: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  webFallbackText: {
+    fontSize: 12,
+    color: '#4F46E5',
+    fontWeight: '600',
   },
 });

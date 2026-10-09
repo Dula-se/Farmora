@@ -66,6 +66,23 @@ export interface FirestoreMessage {
   voiceUrl?: string;          // Firebase Storage download URL for playback
   voiceBase64?: string;       // Base64 audio string (guarantees playback across devices)
   offer?: FirestoreOffer;
+  callInvitation?: FirestoreCallInvitation;
+}
+
+export interface FirestoreCallInvitation {
+  callId: string;
+  meetingUrl: string;
+  hostName: string;
+  hostAvatar?: string;
+  mode: 'video' | 'audio';
+  type: 'instant' | 'scheduled';
+  scheduledDate?: string;
+  scheduledTime?: string;
+  status: 'active' | 'scheduled' | 'ended';
+  provider: 'cal.com' | 'google-video';
+  calBookingUid?: string;
+  notes?: string;
+  inspectionFocus?: string[];
 }
 
 export interface FirestoreOffer {
@@ -589,6 +606,7 @@ export const FirestoreChatService = {
               voiceUrl: data.voiceUrl || undefined,
               voiceBase64: data.voiceBase64 || undefined,
               offer: data.offer || undefined,
+              callInvitation: data.callInvitation || undefined,
             };
           });
 
@@ -624,7 +642,7 @@ export const FirestoreChatService = {
   },
 
   /**
-   * Send a text, photo, or offer message.
+   * Send a text, photo, offer, or call invitation message.
    * Fast-path: immediately saves to MongoDB backend, updates local cache and notifies UI,
    * then updates Firestore & sends push notifications in background without blocking the UI.
    */
@@ -634,6 +652,7 @@ export const FirestoreChatService = {
     text: string;
     imageUri?: string;  // base64 or URL
     offer?: FirestoreOffer;
+    callInvitation?: FirestoreCallInvitation;
   }): Promise<FirestoreMessage> {
     const myId = params.currentUser.id || params.currentUser._id || '';
     const myRole = params.currentUser.accountType === 'farmer' ? 'farmer' : 'buyer';
@@ -654,6 +673,7 @@ export const FirestoreChatService = {
       imageUri: params.imageUri,
       isVoiceNote: false,
       offer: params.offer,
+      callInvitation: params.callInvitation,
     };
 
     // 1. FAST PATH: Save to MongoDB backend
@@ -669,6 +689,7 @@ export const FirestoreChatService = {
           imageUri: params.imageUri,
           isVoiceNote: false,
           offer: params.offer,
+          callInvitation: params.callInvitation,
           participants: parts,
         }),
       });
@@ -701,6 +722,7 @@ export const FirestoreChatService = {
         };
         if (params.imageUri) msgData.imageUri = params.imageUri;
         if (params.offer) msgData.offer = params.offer;
+        if (params.callInvitation) msgData.callInvitation = params.callInvitation;
 
         await Promise.race([
           addDoc(msgsRef, msgData),
@@ -717,9 +739,12 @@ export const FirestoreChatService = {
           const convData = convSnap.data() as Omit<FirestoreConversation, 'id'>;
           const otherUserId = convData.participants.find((p) => p !== myId) || '';
           const currentUnread = convData.unreadCounts?.[otherUserId] || 0;
+          const previewText = params.callInvitation
+            ? (params.callInvitation.type === 'scheduled' ? '📅 Video Inspection Scheduled' : '📹 Video Call Invitation')
+            : params.text || (params.imageUri ? '📷 Photo' : '🤝 Offer proposal');
 
           await updateDoc(convRef, {
-            lastMessage: params.text || (params.imageUri ? '📷 Photo' : '🤝 Offer proposal'),
+            lastMessage: previewText,
             lastMessageTime: now,
             updatedAt: now,
             [`unreadCounts.${otherUserId}`]: currentUnread + 1,
@@ -729,7 +754,7 @@ export const FirestoreChatService = {
             sendFcmPushNotification({
               recipientUserId: otherUserId,
               title: params.currentUser.fullName || 'New Message',
-              body: params.text || (params.imageUri ? '📷 Sent a photo' : '💬 New message on Famora'),
+              body: previewText,
               data: {
                 conversationId: params.conversationId,
                 senderId: myId,

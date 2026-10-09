@@ -23,6 +23,7 @@ import {
   ActivityIndicator,
   PermissionsAndroid,
   Linking,
+  Share,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -48,7 +49,10 @@ import {
   FirestoreMessage,
   FirestoreConversation,
   FirestoreOffer,
+  FirestoreCallInvitation,
 } from '@/services/firestore-chat-service';
+import { CalComService } from '@/services/calcom-service';
+import { ScheduleInspectionModal } from './schedule-inspection-modal';
 import { getStoredUser, ApiUser, apiFetch } from '@/services/api';
 import {
   capturePhotoFromCamera,
@@ -95,6 +99,7 @@ export function ChatConversationScreen({
   const [sending, setSending] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showActionSheet, setShowActionSheet] = useState(false);
+  const [showLocalScheduleModal, setShowLocalScheduleModal] = useState(false);
   const [liveOtherAvatar, setLiveOtherAvatar] = useState<string>('');
 
   // Edit & Delete message actions
@@ -858,6 +863,102 @@ export function ChatConversationScreen({
     }
   };
 
+  // ── Video Call (Google Video + Cal.com) Handlers ──────────────────────────
+
+  const handleInitiateVideoCall = async () => {
+    if (!currentUser) return;
+    const instant = CalComService.generateInstantMeetingUrl();
+
+    // 1. Send the invitation in the conversation screen to the client to login/join
+    const callInvitation: FirestoreCallInvitation = {
+      callId: `call_${Date.now()}`,
+      meetingUrl: instant.googleMeetUrl,
+      hostName: currentUser.fullName || 'You',
+      hostAvatar: currentUser.avatarUrl,
+      mode: 'video',
+      type: 'instant',
+      status: 'active',
+      provider: 'google-video',
+    };
+
+    try {
+      await FirestoreChatService.sendMessage({
+        conversationId,
+        currentUser,
+        text: `📹 Video call started! Tap 'Join Video Call' below to enter the meeting.`,
+        callInvitation,
+      });
+    } catch (err) {
+      console.warn('[Chat] Failed to send video call invitation:', err);
+    }
+
+    // 2. Suddenly navigates to google video!
+    try {
+      await Linking.openURL(instant.googleMeetUrl);
+    } catch {
+      Alert.alert('Google Video Call', `Call link: ${instant.googleMeetUrl}`);
+    }
+
+    // 3. Keep parent flow synced
+    if (onStartVideoCall) {
+      onStartVideoCall(participantName, participantAvatar);
+    }
+  };
+
+  const handleOpenMeetingUrl = async (meetingUrl: string) => {
+    if (!meetingUrl) return;
+    try {
+      await Linking.openURL(meetingUrl);
+    } catch {
+      Alert.alert('Video Meeting', `Open in your browser:\n${meetingUrl}`);
+    }
+  };
+
+  const handleShareMeetingUrl = async (meetingUrl: string) => {
+    if (!meetingUrl) return;
+    try {
+      await Share.share({
+        message: `Join my live video call on Famora: ${meetingUrl}`,
+        url: meetingUrl,
+      });
+    } catch {}
+  };
+
+  const handleLocalInspectionScheduled = async (details: {
+    date: string;
+    time: string;
+    note: string;
+    meetingUrl: string;
+    calBookingUid?: string;
+    inspectionFocus: string[];
+  }) => {
+    setShowLocalScheduleModal(false);
+    if (!currentUser) return;
+
+    const callInvitation: FirestoreCallInvitation = {
+      callId: details.calBookingUid || `sched_${Date.now()}`,
+      meetingUrl: details.meetingUrl,
+      hostName: currentUser.fullName || 'You',
+      hostAvatar: currentUser.avatarUrl,
+      mode: 'video',
+      type: 'scheduled',
+      status: 'scheduled',
+      scheduledDate: details.date,
+      scheduledTime: details.time,
+      provider: 'cal.com',
+      calBookingUid: details.calBookingUid,
+      notes: details.note,
+      inspectionFocus: details.inspectionFocus,
+    };
+
+    await FirestoreChatService.sendMessage({
+      conversationId,
+      currentUser,
+      text: `📅 Scheduled a live video inspection for ${details.date} at ${details.time} via Cal.com.`,
+      callInvitation,
+    });
+  };
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   const myId = currentUser?.id || currentUser?._id || '';
@@ -921,7 +1022,7 @@ export function ChatConversationScreen({
           <Pressable style={styles.headerIconBtn} onPress={() => onStartAudioCall(participantName, participantAvatar)}>
             <Text style={{ fontSize: 17 }}>📞</Text>
           </Pressable>
-          <Pressable style={styles.headerIconBtn} onPress={() => onStartVideoCall(participantName, participantAvatar)}>
+          <Pressable style={styles.headerIconBtn} onPress={handleInitiateVideoCall}>
             <Text style={{ fontSize: 17 }}>📹</Text>
           </Pressable>
           {onRateUser && otherUserId && (
@@ -1062,10 +1163,83 @@ export function ChatConversationScreen({
                         )}
 
                         {/* Text */}
-                        {!item.isVoiceNote && !item.offer && item.text && (
+                        {!item.isVoiceNote && !item.offer && !item.callInvitation && item.text && (
                           <Text style={[styles.msgText, isMe ? styles.msgTextMe : styles.msgTextThem]}>
                             {item.text}
                           </Text>
+                        )}
+
+                        {/* Call Invitation card */}
+                        {item.callInvitation && (
+                          <View style={styles.callCard}>
+                            <View style={styles.callHeader}>
+                              <View style={styles.callHeaderBadgeRow}>
+                                <View
+                                  style={[
+                                    styles.callStatusDot,
+                                    item.callInvitation.type === 'instant' ? styles.callDotLive : styles.callDotScheduled,
+                                  ]}
+                                />
+                                <Text
+                                  style={[
+                                    styles.callBadgeText,
+                                    item.callInvitation.type === 'instant' ? styles.callBadgeTextLive : styles.callBadgeTextScheduled,
+                                  ]}>
+                                  {item.callInvitation.type === 'instant' ? 'LIVE GOOGLE VIDEO' : 'CAL.COM INSPECTION'}
+                                </Text>
+                              </View>
+                              <Text style={styles.callProviderTag}>
+                                {item.callInvitation.provider === 'cal.com' ? '⚡ Cal.com' : '⚡ Google Video'}
+                              </Text>
+                            </View>
+
+                            <Text style={styles.callTitle}>
+                              {item.callInvitation.type === 'instant'
+                                ? `Video Call Invitation from ${item.senderName}`
+                                : `Live Farm Inspection Scheduled`}
+                            </Text>
+
+                            {item.callInvitation.type === 'scheduled' && (
+                              <View style={styles.callScheduleInfoBox}>
+                                <Text style={styles.callScheduleTime}>
+                                  🗓️ {item.callInvitation.scheduledDate} at {item.callInvitation.scheduledTime}
+                                </Text>
+                                {item.callInvitation.inspectionFocus && item.callInvitation.inspectionFocus.length > 0 && (
+                                  <Text style={styles.callScheduleFocus} numberOfLines={2}>
+                                    🎯 Focus: {item.callInvitation.inspectionFocus.join(', ')}
+                                  </Text>
+                                )}
+                              </View>
+                            )}
+
+                            {item.callInvitation.notes ? (
+                              <Text style={styles.callNotesText} numberOfLines={2}>
+                                💬 "{item.callInvitation.notes}"
+                              </Text>
+                            ) : null}
+
+                            {/* Main CTA: Join Video Call */}
+                            <Pressable
+                              style={styles.joinCallBtn}
+                              onPress={() => handleOpenMeetingUrl(item.callInvitation?.meetingUrl || '')}>
+                              <Text style={{ fontSize: 16 }}>📹</Text>
+                              <Text style={styles.joinCallBtnText}>
+                                {item.callInvitation.type === 'instant' ? 'Join Video Call Now' : 'Open Video Room'}
+                              </Text>
+                            </Pressable>
+
+                            {/* Meeting URL & Share Link */}
+                            <View style={styles.callUrlRow}>
+                              <Text style={styles.callUrlText} numberOfLines={1}>
+                                {item.callInvitation.meetingUrl}
+                              </Text>
+                              <Pressable
+                                style={styles.copyLinkBtn}
+                                onPress={() => handleShareMeetingUrl(item.callInvitation?.meetingUrl || '')}>
+                                <Text style={styles.copyLinkBtnText}>Share</Text>
+                              </Pressable>
+                            </View>
+                          </View>
                         )}
 
                         {/* Offer card */}
@@ -1193,9 +1367,10 @@ export function ChatConversationScreen({
             <Text style={styles.sheetTitle}>Share & Negotiate</Text>
 
             {[
+              { icon: '📹', title: 'Start Instant Video Call (Google Video)', sub: 'Launch Google Meet & send invite to client', action: () => { setShowActionSheet(false); handleInitiateVideoCall(); } },
+              { icon: '📅', title: 'Schedule Video Call (Cal.com)', sub: 'Book live farm inspection via Cal.com scheduler', action: () => { setShowActionSheet(false); onRequestInspection ? onRequestInspection() : setShowLocalScheduleModal(true); } },
               { icon: '💰', title: 'Make Price Offer', sub: 'Negotiate direct bulk farm gate price', action: () => { setShowActionSheet(false); setShowOfferModal(true); } },
               { icon: '🎙️', title: 'Attach Audio / Voice Note', sub: 'Send audio note file from device', action: () => { setShowActionSheet(false); handlePickAndSendAudio(); } },
-              { icon: '📹', title: 'Request Live Inspection', sub: 'Inspect crop quality & field freshness', action: () => { setShowActionSheet(false); onRequestInspection ? onRequestInspection() : handleSendText('I would like to request a live video inspection of the produce.'); } },
               { icon: '🖼️', title: 'Send Photo from Gallery', sub: 'Attach produce photos', action: () => handleSendPhoto('gallery') },
               { icon: '📍', title: 'Share Farm Location', sub: 'Send coordinates for collection', action: () => { setShowActionSheet(false); handleSendText('📍 Shared Location: Please check my farm coordinates on the map.'); } },
             ].map((item) => (
@@ -1347,6 +1522,18 @@ export function ChatConversationScreen({
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Schedule Live Inspection Modal (Cal.com) ─────────────────────────── */}
+      <ScheduleInspectionModal
+        visible={showLocalScheduleModal}
+        farmerName={participantName}
+        farmerEmail={currentUser?.accountType === 'farmer' ? currentUser.email : ''}
+        buyerName={currentUser?.accountType === 'buyer' ? currentUser.fullName : participantName}
+        buyerEmail={currentUser?.accountType === 'buyer' ? currentUser.email : ''}
+        productTitle={pinnedProduct}
+        onClose={() => setShowLocalScheduleModal(false)}
+        onScheduled={handleLocalInspectionScheduled}
+      />
     </SafeAreaView>
   );
 }
@@ -1552,4 +1739,137 @@ const styles = StyleSheet.create({
   editCancelText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
   editSaveBtn: { flex: 1, backgroundColor: '#1E5E3A', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   editSaveText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+
+  // Call Invitation Card
+  callCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    minWidth: 240,
+    maxWidth: 290,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  callHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  callHeaderBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  callStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  callDotLive: {
+    backgroundColor: '#EF4444',
+  },
+  callDotScheduled: {
+    backgroundColor: '#4F46E5',
+  },
+  callBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  callBadgeTextLive: {
+    color: '#DC2626',
+  },
+  callBadgeTextScheduled: {
+    color: '#4F46E5',
+  },
+  callProviderTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  callTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 6,
+  },
+  callScheduleInfoBox: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  callScheduleTime: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#3730A3',
+  },
+  callScheduleFocus: {
+    fontSize: 11,
+    color: '#4338CA',
+    marginTop: 2,
+  },
+  callNotesText: {
+    fontSize: 12,
+    color: '#475569',
+    fontStyle: 'italic',
+    marginBottom: 10,
+  },
+  joinCallBtn: {
+    backgroundColor: '#1E5E3A',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  joinCallBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  callUrlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  callUrlText: {
+    fontSize: 11,
+    color: '#64748B',
+    flex: 1,
+    marginRight: 6,
+  },
+  copyLinkBtn: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  copyLinkBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
 });

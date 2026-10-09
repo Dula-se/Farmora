@@ -18,6 +18,7 @@ import {
   markAllNotificationsAsRead,
   ApiNotificationItem,
 } from '@/services/api';
+import { sendLocalNotification } from '@/services/notifications';
 
 export interface NotificationItem {
   id: string;
@@ -133,6 +134,40 @@ export function NotificationsScreen({
     onActionPress?.(item);
   };
 
+  const handleSendTestAlert = async () => {
+    const testCases = [
+      {
+        title: '🔐 Security Alert: New Login Detected',
+        body: 'Someone logged into your Farmora account from a new Android device.',
+        type: 'system' as const,
+      },
+      {
+        title: '🔨 New Bid on Nuwara Eliya Leeks!',
+        body: 'Sunil Dissanayake placed a leading bid of Rs. 380/kg (150 kg lot).',
+        type: 'bid' as const,
+      },
+      {
+        title: '📦 New Order Placed: #1089',
+        body: 'Green Leaf Supermarket placed an order for Highland Carrots worth Rs. 24,000!',
+        type: 'order' as const,
+      },
+    ];
+
+    const pick = testCases[Math.floor(Math.random() * testCases.length)];
+    await sendLocalNotification(pick.title, pick.body, { test: true });
+
+    const newNotif: NotificationItem = {
+      id: 'test-' + Date.now(),
+      title: pick.title,
+      description: pick.body,
+      type: pick.type,
+      timestamp: 'Just now',
+      isRead: false,
+      actionLabel: 'View Details',
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+  };
+
   const getIcon = (type: NotificationItem['type']) => {
     switch (type) {
       case 'order':
@@ -185,14 +220,19 @@ export function NotificationsScreen({
         ))}
       </View>
 
-      {/* Mark All Read button */}
+      {/* Mark All Read & Test Alert buttons */}
       <View style={styles.markReadRow}>
         <Text style={styles.unreadCountText}>
           {notifications.filter((n) => !n.isRead).length} unread updates
         </Text>
-        <Pressable onPress={markAllRead}>
-          <Text style={styles.markReadBtnText}>Mark all as read</Text>
-        </Pressable>
+        <View style={styles.actionBtnsGroup}>
+          <Pressable style={styles.testBtn} onPress={handleSendTestAlert}>
+            <Text style={styles.testBtnText}>🔔 Test Alert</Text>
+          </Pressable>
+          <Pressable onPress={markAllRead}>
+            <Text style={styles.markReadBtnText}>Mark all read</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* List */}
@@ -301,6 +341,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#475569',
+  },
+  actionBtnsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  testBtn: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  testBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#166534',
   },
   markReadBtnText: {
     fontSize: 12,

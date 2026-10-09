@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Text,
   View,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -280,6 +281,14 @@ export function VideoCallScreen({
               onPress={handleToggleVideo}>
               <Text style={styles.controlIconText}>{videoPaused ? '🙈' : '📹'}</Text>
               <Text style={styles.controlSubText}>{videoPaused ? 'Paused' : 'Camera'}</Text>
+            </Pressable>
+
+            {/* Google Meet / Video launcher */}
+            <Pressable
+              style={styles.controlCircle}
+              onPress={() => Linking.openURL('https://meet.google.com/new')}>
+              <Text style={styles.controlIconText}>🌐</Text>
+              <Text style={styles.controlSubText}>Meet</Text>
             </Pressable>
 
             {/* End Call Button */}
