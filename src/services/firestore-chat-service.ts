@@ -452,18 +452,21 @@ export const FirestoreChatService = {
     };
 
     // 1. Fetch from MongoDB backend (restores chats on brand new phones)
-    apiFetch<FirestoreConversation[]>(`/chat/conversations?userIds=${encodeURIComponent(ids.join(','))}`)
-      .then((res) => {
-        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-          res.data.forEach((c) => {
-            if (!convMap.has(c.id)) {
+    const loadFromBackend = () => {
+      apiFetch<FirestoreConversation[]>(`/chat/conversations?userIds=${encodeURIComponent(ids.join(','))}`)
+        .then((res) => {
+          if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+            res.data.forEach((c) => {
               convMap.set(c.id, c);
-            }
-          });
-          emitSorted();
-        }
-      })
-      .catch(() => {});
+            });
+            emitSorted();
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadFromBackend();
+    const pollInterval = setInterval(loadFromBackend, 3500);
 
     // 2. Safety timer: If network / Firestore is delayed or offline, clear loading spinner!
     const safetyTimer = setTimeout(() => {
@@ -502,9 +505,11 @@ export const FirestoreChatService = {
     });
 
     return () => {
+      clearInterval(pollInterval);
       clearTimeout(safetyTimer);
       unsubs.forEach((u) => u());
     };
+
   },
 
   /**
@@ -653,6 +658,7 @@ export const FirestoreChatService = {
 
     // 1. FAST PATH: Save to MongoDB backend
     try {
+      const parts = params.conversationId.includes('_') ? params.conversationId.split('_') : [myId];
       const res = await apiFetch<FirestoreMessage>(`/chat/conversations/${params.conversationId}/messages`, {
         method: 'POST',
         body: JSON.stringify({
@@ -663,6 +669,7 @@ export const FirestoreChatService = {
           imageUri: params.imageUri,
           isVoiceNote: false,
           offer: params.offer,
+          participants: parts,
         }),
       });
       if (res?.data && res.data.id) {
@@ -786,6 +793,7 @@ export const FirestoreChatService = {
 
     // 2. FAST PATH: Save to MongoDB backend
     try {
+      const parts = params.conversationId.includes('_') ? params.conversationId.split('_') : [myId];
       const res = await apiFetch<FirestoreMessage>(`/chat/conversations/${params.conversationId}/messages`, {
         method: 'POST',
         body: JSON.stringify({
@@ -796,6 +804,7 @@ export const FirestoreChatService = {
           isVoiceNote: true,
           voiceDuration: durationStr,
           voiceBase64: base64Audio || undefined,
+          participants: parts,
         }),
       });
       if (res?.data && res.data.id) {
@@ -992,6 +1001,12 @@ export const FirestoreChatService = {
     try {
       const convRef = doc(db, 'conversations', conversationId);
       await updateDoc(convRef, { [`unreadCounts.${userId}`]: 0 });
+    } catch {}
+    try {
+      apiFetch(`/chat/conversations/${conversationId}/read`, {
+        method: 'PATCH',
+        body: JSON.stringify({ userId }),
+      }).catch(() => {});
     } catch {}
   },
 

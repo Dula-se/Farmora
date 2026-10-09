@@ -184,6 +184,17 @@ export function MessagesListScreen({
     }
   };
 
+  const myIds = currentUser
+    ? [
+        currentUser.id,
+        currentUser._id,
+        currentUser.mobileNumber,
+        currentUser.mobileNumber?.replace(/\s+/g, ''),
+        currentUser.email,
+        currentUser.accountType === 'farmer' ? 'user-farmer-1' : 'user-buyer-1',
+      ].filter(Boolean) as string[]
+    : [];
+
   const myId = currentUser?.id || currentUser?._id || '';
 
   const filtered = conversations.filter((c) => {
@@ -197,12 +208,25 @@ export function MessagesListScreen({
     );
   });
 
-  const getOtherUserId = (conv: FirestoreConversation): string =>
-    conv.participants.find((p) => p !== myId) || '';
+  const getOtherUserId = (conv: FirestoreConversation): string => {
+    const found = conv.participants.find((p) => !myIds.includes(p));
+    if (found) return found;
+    const nameKeys = Object.keys(conv.participantNames || {});
+    const otherKey = nameKeys.find((k) => !myIds.includes(k));
+    if (otherKey) return otherKey;
+    return conv.participants[0] || '';
+  };
 
   const getOtherName = (conv: FirestoreConversation): string => {
     const otherId = getOtherUserId(conv);
-    return conv.participantNames?.[otherId] || 'User';
+    if (conv.participantNames?.[otherId] && conv.participantNames[otherId] !== 'User') {
+      return conv.participantNames[otherId];
+    }
+    for (const [k, v] of Object.entries(conv.participantNames || {})) {
+      if (!myIds.includes(k) && v && v !== 'User') return v;
+    }
+    if (conv.participantNames?.[otherId]) return conv.participantNames[otherId];
+    return currentRole === 'buyer' ? 'Farmer' : 'Buyer';
   };
 
   const getOtherAvatar = (conv: FirestoreConversation): string => {
@@ -210,16 +234,29 @@ export function MessagesListScreen({
     const otherName = getOtherName(conv).toLowerCase().trim();
     if (dbAvatars[otherId]) return dbAvatars[otherId];
     if (dbAvatars[otherName]) return dbAvatars[otherName];
-    return conv.participantAvatars?.[otherId] || '';
+    if (conv.participantAvatars?.[otherId]) return conv.participantAvatars[otherId];
+    for (const [k, v] of Object.entries(conv.participantAvatars || {})) {
+      if (!myIds.includes(k) && v) return v;
+    }
+    return '';
   };
 
   const getOtherRole = (conv: FirestoreConversation): 'farmer' | 'buyer' => {
     const otherId = getOtherUserId(conv);
-    return conv.participantRoles?.[otherId] || (currentRole === 'buyer' ? 'farmer' : 'buyer');
+    if (conv.participantRoles?.[otherId]) return conv.participantRoles[otherId];
+    for (const [k, v] of Object.entries(conv.participantRoles || {})) {
+      if (!myIds.includes(k) && v) return v;
+    }
+    return currentRole === 'buyer' ? 'farmer' : 'buyer';
   };
 
-  const getUnread = (conv: FirestoreConversation): number =>
-    conv.unreadCounts?.[myId] || 0;
+  const getUnread = (conv: FirestoreConversation): number => {
+    for (const id of myIds) {
+      if (conv.unreadCounts?.[id]) return conv.unreadCounts[id];
+    }
+    return 0;
+  };
+
 
   const fmtTime = (iso: string): string => {
     if (!iso) return '';

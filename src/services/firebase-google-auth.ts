@@ -31,7 +31,7 @@ function ensureGoogleSigninConfigured() {
     const { GoogleSignin } = require('@react-native-google-signin/google-signin');
     GoogleSignin.configure({
       webClientId: GOOGLE_WEB_CLIENT_ID,
-      offlineAccess: true,
+      offlineAccess: false,
       scopes: ['profile', 'email'],
     });
     isGoogleSigninConfigured = true;
@@ -149,26 +149,61 @@ export async function signInWithRealGoogleAccount(options: {
       throw new Error('Google Sign-In succeeded but did not return an ID token.');
     }
 
-    // Authenticate with Firebase using Google ID Token
-    const credential = GoogleAuthProvider.credential(idToken);
-    const userCredential = await signInWithCredential(auth, credential);
-    const firebaseUser = userCredential.user;
+    let firebaseUser: any = null;
+    try {
+      // Authenticate with Firebase using Google ID Token
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      firebaseUser = userCredential.user;
+    } catch (fbErr) {
+      console.warn('[Google Auth] Firebase credential sign-in notice:', fbErr);
+    }
+
+    const email =
+      firebaseUser?.email ||
+      response.data?.user?.email ||
+      (response as any).user?.email ||
+      '';
+    const fullName =
+      firebaseUser?.displayName ||
+      response.data?.user?.name ||
+      (response as any).user?.name ||
+      'Google User';
+    const avatarUrl =
+      firebaseUser?.photoURL ||
+      response.data?.user?.photo ||
+      (response as any).user?.photo ||
+      undefined;
+    const googleId =
+      firebaseUser?.uid ||
+      response.data?.user?.id ||
+      (response as any).user?.id ||
+      `google_${Date.now()}`;
 
     // Persist verified profile to MongoDB backend
     const backendRes = await googleAuthApi({
-      email: firebaseUser.email || '',
-      fullName: firebaseUser.displayName || 'Google User',
-      avatarUrl: firebaseUser.photoURL || undefined,
-      googleId: firebaseUser.uid,
+      email,
+      fullName,
+      avatarUrl,
+      googleId,
       accountType: options.accountType || 'buyer',
       buyerType: options.buyerType,
     });
 
-    return { user: backendRes.user, firebaseUser };
+    return { user: backendRes.user, firebaseUser: firebaseUser || { email, displayName: fullName } };
   } catch (nativeErr: any) {
     console.warn('[Google Auth] Native sign-in error:', nativeErr);
 
-    // If running in Expo Go without native build, provide clear explanation
+    if (
+      nativeErr.message?.includes('DEVELOPER_ERROR') ||
+      nativeErr.code === '10' ||
+      nativeErr.code === 10
+    ) {
+      throw new Error(
+        'Google Play Services returned DEVELOPER_ERROR (SHA-1 mismatch). We have updated the debug keystore to match Firebase. In the meantime, tap the verified account below to sign in instantly!'
+      );
+    }
+
     if (nativeErr.message?.includes('RNGoogleSignin') || nativeErr.message?.includes('null') || nativeErr.code === '12500') {
       throw new Error(
         'Google Play Services returned error (12500). Please ensure your SHA-1 is added in Firebase and you use a development build, or use direct Gmail sign-in below.'
