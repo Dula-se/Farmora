@@ -427,7 +427,7 @@ export class ChatController {
         msg = await MessageModel.findById(messageId);
       }
       if (!msg) {
-        msg = await MessageModel.findOne({ $or: [{ _id: messageId as any }, { id: messageId }] });
+        msg = await MessageModel.findOne({ id: messageId });
       }
       if (!msg) {
         return sendError(res, 'Message not found.', 404);
@@ -488,7 +488,7 @@ export class ChatController {
         msg = await MessageModel.findById(messageId);
       }
       if (!msg) {
-        msg = await MessageModel.findOne({ $or: [{ _id: messageId as any }, { id: messageId }] });
+        msg = await MessageModel.findOne({ id: messageId });
       }
       if (!msg) {
         return sendError(res, 'Message not found.', 404);

@@ -175,8 +175,11 @@ export function ChatConversationScreen({
           }
           return;
         }
-      } catch (e) {
-        console.warn('[Chat] Firestore getDoc notice:', e);
+      } catch (e: any) {
+        // Only warn for unexpected errors, offline fallback handles offline state cleanly
+        if (!e?.message?.includes('offline')) {
+          console.warn('[Chat] Firestore getDoc notice:', e);
+        }
       }
 
       // Fallback: Fetch from backend MongoDB API for new devices/offline
@@ -767,8 +770,14 @@ export function ChatConversationScreen({
 
   const handleLongPressMessage = (msg: FirestoreMessage) => {
     if (msg.isDeleted) return;
-    const currentMyId = currentUser?.id || currentUser?._id || '';
-    if (msg.senderId !== currentMyId) {
+    const currentMyId = currentUser?.id || currentUser?._id || myId || '';
+    const isMeSender =
+      msg.senderId === currentMyId ||
+      (currentUser?.id && msg.senderId === currentUser.id) ||
+      (currentUser?._id && msg.senderId === currentUser._id) ||
+      (myId && msg.senderId === myId);
+
+    if (!isMeSender) {
       Alert.alert('Notice', 'You can only edit or delete messages sent by you.');
       return;
     }
@@ -893,12 +902,31 @@ export function ChatConversationScreen({
 
   // ── Video Call (Google Video + Cal.com) Handlers ──────────────────────────
 
-  const handleInitiateVideoCall = async () => {
+  const handleInitiateVideoCall = () => {
+    if (!currentUser) return;
+    Alert.alert(
+      'Live Video Inspection 📹',
+      `Choose how you would like to connect with ${participantName}:`,
+      [
+        {
+          text: '📅 Schedule with Cal.com',
+          onPress: () => setShowLocalScheduleModal(true),
+        },
+        {
+          text: '⚡ Instant Video Call',
+          onPress: startInstantVideoCall,
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const startInstantVideoCall = async () => {
     if (!currentUser) return;
     setSending(true);
 
     try {
-      // 1. Create real Cal.com video call booking (Google Meet / Cal Video)
+      // 1. Create real Cal.com video call booking / Cal Video room
       const booking = await CalComService.createInstantCallBooking({
         hostName: currentUser.fullName || 'Farmer',
         hostEmail: currentUser.email,
@@ -917,7 +945,7 @@ export function ChatConversationScreen({
         mode: 'video',
         type: 'instant',
         status: 'active',
-        provider: 'google-video',
+        provider: 'cal.com',
       };
 
       await FirestoreChatService.sendMessage({
@@ -1226,7 +1254,7 @@ export function ChatConversationScreen({
                                     styles.callBadgeText,
                                     item.callInvitation.type === 'instant' ? styles.callBadgeTextLive : styles.callBadgeTextScheduled,
                                   ]}>
-                                  {item.callInvitation.type === 'instant' ? 'LIVE GOOGLE VIDEO' : 'CAL.COM INSPECTION'}
+                                  {item.callInvitation.type === 'instant' ? 'LIVE CAL.COM VIDEO' : 'CAL.COM INSPECTION'}
                                 </Text>
                               </View>
                               <Text style={styles.callProviderTag}>

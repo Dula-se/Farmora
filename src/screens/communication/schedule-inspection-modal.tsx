@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { CalComService, CAL_COM_CONFIG } from '@/services/calcom-service';
+import { CalComService, CAL_COM_CONFIG, CalDaySlots, CalSlotItem } from '@/services/calcom-service';
 
 interface ScheduleInspectionModalProps {
   visible: boolean;
@@ -33,39 +33,6 @@ interface ScheduleInspectionModalProps {
   }) => void;
 }
 
-// Generate dynamic upcoming 5 days
-function getUpcomingDays() {
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const result = [];
-  const now = new Date();
-
-  for (let i = 0; i < 5; i++) {
-    const d = new Date(now);
-    d.setDate(now.getDate() + i);
-    const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : days[d.getDay()];
-    const dateStr = `${months[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')}`;
-    const isoDate = d.toISOString().split('T')[0];
-    result.push({
-      id: `day_${i}`,
-      day: dayName,
-      date: dateStr,
-      isoDate,
-    });
-  }
-  return result;
-}
-
-const TIME_SLOTS = [
-  { label: '09:00 AM', hour: 9, min: 0 },
-  { label: '10:30 AM', hour: 10, min: 30 },
-  { label: '11:30 AM', hour: 11, min: 30 },
-  { label: '02:00 PM', hour: 14, min: 0 },
-  { label: '03:30 PM', hour: 15, min: 30 },
-  { label: '04:30 PM', hour: 16, min: 30 },
-  { label: '05:45 PM', hour: 17, min: 45 },
-];
-
 const CHECKLIST_ITEMS = [
   'Harvest freshness & color grading',
   'Crate sorting & packaging hygiene',
@@ -83,22 +50,57 @@ export function ScheduleInspectionModal({
   onClose,
   onScheduled,
 }: ScheduleInspectionModalProps) {
-  const upcomingDays = getUpcomingDays();
-  const now = new Date();
-  const futureSlotToday = TIME_SLOTS.find(
-    (s) => s.hour > now.getHours() || (s.hour === now.getHours() && s.min > now.getMinutes() + 15)
-  );
-  const defaultDay = futureSlotToday ? upcomingDays[0] : (upcomingDays[1] || upcomingDays[0]);
-  const defaultSlot = futureSlotToday || TIME_SLOTS[0];
-
-  const [selectedDayObj, setSelectedDayObj] = useState(defaultDay);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState(defaultSlot);
   const [selectedEventType, setSelectedEventType] = useState<'15min' | '30min'>('15min');
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [availableDays, setAvailableDays] = useState<CalDaySlots[]>([]);
+  const [selectedDay, setSelectedDay] = useState<CalDaySlots | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<CalSlotItem | null>(null);
+
   const [selectedChecklist, setSelectedChecklist] = useState<string[]>([
     'Harvest freshness & color grading',
   ]);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Load real available slots from Cal.com whenever modal opens or event type changes
+  useEffect(() => {
+    if (visible) {
+      loadCalComSlots();
+    }
+  }, [visible, selectedEventType]);
+
+  const loadCalComSlots = async () => {
+    setLoadingSlots(true);
+    try {
+      const days = await CalComService.getAvailableSlots({
+        eventTypeSlug: selectedEventType,
+        daysAhead: 7,
+        timeZone: 'Asia/Colombo',
+      });
+      setAvailableDays(days);
+      if (days.length > 0) {
+        setSelectedDay(days[0]);
+        if (days[0].slots.length > 0) {
+          setSelectedSlot(days[0].slots[0]);
+        } else {
+          setSelectedSlot(null);
+        }
+      }
+    } catch (err) {
+      console.warn('[ScheduleInspectionModal] Failed to load Cal.com slots:', err);
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const handleSelectDay = (day: CalDaySlots) => {
+    setSelectedDay(day);
+    if (day.slots.length > 0) {
+      setSelectedSlot(day.slots[0]);
+    } else {
+      setSelectedSlot(null);
+    }
+  };
 
   const toggleChecklist = (item: string) => {
     if (selectedChecklist.includes(item)) {
@@ -119,26 +121,16 @@ export function ScheduleInspectionModal({
 
   const handleConfirm = async () => {
     if (isSubmitting) return;
+
+    if (!selectedSlot || !selectedDay) {
+      Alert.alert('Select a Time Slot', 'Please choose an available Cal.com time slot before confirming.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      // Calculate ISO start date string for Cal.com in UTC
-      const [year, month, day] = selectedDayObj.isoDate.split('-').map(Number);
-      // Construct in local Asia/Colombo time (UTC+5:30)
-      const appointmentDate = new Date();
-      appointmentDate.setFullYear(year, month - 1, day);
-      appointmentDate.setHours(selectedTimeSlot.hour, selectedTimeSlot.min, 0, 0);
-
-      // Guard: if time is in the past, shift to tomorrow or +15 mins so Cal.com never rejects with "in the past"
-      if (appointmentDate.getTime() <= Date.now() + 3 * 60 * 1000) {
-        if (selectedDayObj.day === 'Today') {
-          appointmentDate.setDate(appointmentDate.getDate() + 1); // schedule for tomorrow at same time
-        } else {
-          appointmentDate.setTime(Date.now() + 15 * 60 * 1000);
-        }
-      }
-
-      const startIso = appointmentDate.toISOString();
+      const startIso = selectedSlot.startIso;
       const eventTypeId =
         selectedEventType === '15min'
           ? CAL_COM_CONFIG.eventTypes.min15.id
@@ -153,7 +145,7 @@ export function ScheduleInspectionModal({
         ? `${notes.trim()} (Inspection focus: ${selectedChecklist.join(', ')})`
         : `Harvest inspection for ${productTitle || 'produce'} focus: ${selectedChecklist.join(', ')}`;
 
-      // Call Cal.com API v2
+      // Call Cal.com API v2 to book the selected slot
       const booking = await CalComService.createBooking({
         eventTypeId,
         startIso,
@@ -170,8 +162,8 @@ export function ScheduleInspectionModal({
       setIsSubmitting(false);
 
       onScheduled({
-        date: selectedDayObj.date,
-        time: selectedTimeSlot.label,
+        date: selectedDay.formattedDate,
+        time: selectedSlot.timeLabel,
         note: noteText,
         meetingUrl,
         calBookingUid: booking.uid,
@@ -180,7 +172,7 @@ export function ScheduleInspectionModal({
 
       Alert.alert(
         'Video Inspection Scheduled! 📅',
-        `Live video inspection with ${farmerName} confirmed via Cal.com for ${selectedDayObj.date} at ${selectedTimeSlot.label}.\n\nInvitation link has been posted into your conversation.`,
+        `Live video inspection with ${farmerName} confirmed via Cal.com for ${selectedDay.formattedDate} at ${selectedSlot.timeLabel}.\n\nInvitation link has been posted into your conversation.`,
         [
           {
             text: 'Join Video Room',
@@ -196,11 +188,10 @@ export function ScheduleInspectionModal({
       setIsSubmitting(false);
       console.warn('[ScheduleInspectionModal] Cal.com schedule error:', err);
 
-      // Graceful fallback to guaranteed room link
-      const fallbackUrl = `https://meet.google.com/new`;
+      const fallbackUrl = `${CAL_COM_CONFIG.publicBookingBase}/${selectedEventType}`;
       onScheduled({
-        date: selectedDayObj.date,
-        time: selectedTimeSlot.label,
+        date: selectedDay.formattedDate,
+        time: selectedSlot.timeLabel,
         note: notes.trim() || 'General harvest inspection',
         meetingUrl: fallbackUrl,
         inspectionFocus: selectedChecklist,
@@ -208,7 +199,7 @@ export function ScheduleInspectionModal({
 
       Alert.alert(
         'Inspection Scheduled! 📅',
-        `Video call scheduled for ${selectedDayObj.date} at ${selectedTimeSlot.label}. Invitation posted to chat.`,
+        `Video call scheduled for ${selectedDay.formattedDate} at ${selectedSlot.timeLabel}. Invitation posted to chat.`,
         [{ text: 'OK', onPress: onClose }]
       );
     }
@@ -283,43 +274,71 @@ export function ScheduleInspectionModal({
             </View>
 
             {/* Select Date */}
-            <Text style={styles.sectionHeading}>Select Date</Text>
-            <View style={styles.datesRow}>
-              {upcomingDays.map((d) => {
-                const isActive = selectedDayObj.id === d.id;
-                return (
-                  <Pressable
-                    key={d.id}
-                    style={[styles.dateCard, isActive && styles.dateCardActive]}
-                    onPress={() => setSelectedDayObj(d)}>
-                    <Text style={[styles.dayText, isActive && styles.dayTextActive]}>
-                      {d.day}
-                    </Text>
-                    <Text style={[styles.dateText, isActive && styles.dateTextActive]}>
-                      {d.date}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>Select Date</Text>
+              {loadingSlots && (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator size="small" color="#1E5E3A" />
+                  <Text style={styles.loadingText}>Syncing Cal.com...</Text>
+                </View>
+              )}
             </View>
 
-            {/* Select Time Slot */}
-            <Text style={styles.sectionHeading}>Available Time Slots</Text>
-            <View style={styles.slotsRow}>
-              {TIME_SLOTS.map((slot) => {
-                const isActive = selectedTimeSlot.label === slot.label;
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.datesRow}>
+              {availableDays.map((d) => {
+                const isActive = selectedDay?.date === d.date;
                 return (
                   <Pressable
-                    key={slot.label}
-                    style={[styles.slotPill, isActive && styles.slotPillActive]}
-                    onPress={() => setSelectedTimeSlot(slot)}>
-                    <Text style={[styles.slotText, isActive && styles.slotTextActive]}>
-                      {slot.label}
+                    key={d.date}
+                    style={[styles.dateCard, isActive && styles.dateCardActive]}
+                    onPress={() => handleSelectDay(d)}>
+                    <Text style={[styles.dayText, isActive && styles.dayTextActive]}>
+                      {d.dayLabel}
+                    </Text>
+                    <Text style={[styles.dateText, isActive && styles.dateTextActive]}>
+                      {d.date.substring(5)}
                     </Text>
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
+
+            {/* Select Time Slot */}
+            <Text style={styles.sectionHeading}>
+              Available Time Slots {selectedDay ? `(${selectedDay.formattedDate})` : ''}
+            </Text>
+
+            {loadingSlots ? (
+              <View style={styles.loadingSlotsBox}>
+                <ActivityIndicator size="small" color="#1E5E3A" />
+                <Text style={styles.loadingSlotsText}>Loading available slots from Cal.com...</Text>
+              </View>
+            ) : selectedDay && selectedDay.slots.length > 0 ? (
+              <View style={styles.slotsRow}>
+                {selectedDay.slots.map((slot) => {
+                  const isActive = selectedSlot?.startIso === slot.startIso;
+                  return (
+                    <Pressable
+                      key={slot.startIso}
+                      style={[styles.slotPill, isActive && styles.slotPillActive]}
+                      onPress={() => setSelectedSlot(slot)}>
+                      <Text style={[styles.slotText, isActive && styles.slotTextActive]}>
+                        {slot.timeLabel}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={styles.noSlotsBox}>
+                <Text style={styles.noSlotsText}>
+                  No open slots on {selectedDay?.formattedDate || 'this date'}.
+                </Text>
+                <Pressable onPress={handleOpenCalComWeb}>
+                  <Text style={styles.noSlotsAction}>Open Cal.com to view all dates ↗</Text>
+                </Pressable>
+              </View>
+            )}
 
             {/* Inspection Checklist */}
             <Text style={styles.sectionHeading}>Inspection Focus Areas</Text>
@@ -354,9 +373,9 @@ export function ScheduleInspectionModal({
 
             {/* Submit button */}
             <Pressable
-              style={[styles.confirmBtn, isSubmitting && { opacity: 0.7 }]}
+              style={[styles.confirmBtn, (isSubmitting || !selectedSlot) && { opacity: 0.7 }]}
               onPress={handleConfirm}
-              disabled={isSubmitting}>
+              disabled={isSubmitting || !selectedSlot}>
               {isSubmitting ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -364,7 +383,7 @@ export function ScheduleInspectionModal({
                 </View>
               ) : (
                 <Text style={styles.confirmBtnText}>
-                  Confirm Cal.com Video Call ({selectedDayObj.day} at {selectedTimeSlot.label})
+                  Confirm Cal.com Video Call ({selectedDay?.dayLabel || 'Date'} at {selectedSlot?.timeLabel || 'Slot'})
                 </Text>
               )}
             </Pressable>
@@ -419,11 +438,11 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#0F172A',
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#64748B',
     marginTop: 2,
   },
@@ -432,13 +451,29 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 20,
+    paddingBottom: 30,
   },
   sectionHeading: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#334155',
+    color: '#1E293B',
     marginBottom: 10,
-    marginTop: 12,
+    marginTop: 14,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  loadingText: {
+    fontSize: 11,
+    color: '#1E5E3A',
+    fontWeight: '600',
   },
   eventTypeRow: {
     flexDirection: 'row',
@@ -470,41 +505,69 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   eventTypeSubActive: {
-    color: '#15803D',
+    color: '#166534',
   },
   datesRow: {
     flexDirection: 'row',
     gap: 8,
+    paddingBottom: 4,
   },
   dateCard: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingVertical: 10,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
     backgroundColor: '#F8FAFC',
   },
   dateCardActive: {
-    backgroundColor: '#1E5E3A',
     borderColor: '#1E5E3A',
+    backgroundColor: '#1E5E3A',
   },
   dayText: {
-    fontSize: 11,
-    color: '#64748B',
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
   },
   dayTextActive: {
-    color: '#DCFCE7',
+    color: '#FFFFFF',
   },
   dateText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0F172A',
+    fontSize: 11,
+    color: '#64748B',
     marginTop: 2,
   },
   dateTextActive: {
-    color: '#FFFFFF',
+    color: '#DCFCE7',
+  },
+  loadingSlotsBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    justifyContent: 'center',
+  },
+  loadingSlotsText: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  noSlotsBox: {
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  noSlotsText: {
+    fontSize: 13,
+    color: '#64748B',
+    marginBottom: 6,
+  },
+  noSlotsAction: {
+    fontSize: 12,
+    color: '#1E5E3A',
+    fontWeight: '700',
   },
   slotsRow: {
     flexDirection: 'row',
@@ -513,24 +576,23 @@ const styles = StyleSheet.create({
   },
   slotPill: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
   },
   slotPillActive: {
-    backgroundColor: '#1E5E3A',
     borderColor: '#1E5E3A',
+    backgroundColor: '#1E5E3A',
   },
   slotText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
     color: '#334155',
   },
   slotTextActive: {
     color: '#FFFFFF',
-    fontWeight: '700',
   },
   checklistWrap: {
     gap: 8,
@@ -539,16 +601,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    paddingVertical: 4,
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#94A3B8',
+    borderWidth: 2,
+    borderColor: '#CBD5E1',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
   },
   checkboxChecked: {
     backgroundColor: '#1E5E3A',
@@ -557,7 +619,6 @@ const styles = StyleSheet.create({
   checkItemText: {
     fontSize: 13,
     color: '#334155',
-    fontWeight: '500',
   },
   noteInput: {
     borderWidth: 1,
@@ -566,32 +627,32 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 13,
     color: '#0F172A',
-    minHeight: 70,
-    textAlignVertical: 'top',
     backgroundColor: '#F8FAFC',
+    textAlignVertical: 'top',
+    minHeight: 70,
   },
   confirmBtn: {
     backgroundColor: '#1E5E3A',
-    paddingVertical: 14,
     borderRadius: 14,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 20,
     shadowColor: '#1E5E3A',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
   confirmBtnText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   webFallbackBtn: {
     alignItems: 'center',
     marginTop: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   webFallbackText: {
     fontSize: 12,

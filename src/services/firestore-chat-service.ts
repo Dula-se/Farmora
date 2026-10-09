@@ -553,15 +553,41 @@ export const FirestoreChatService = {
       .catch(() => {});
 
     // 1. Fetch from MongoDB API
-    const loadFromBackend = () => {
-      apiFetch<FirestoreMessage[]>(`/chat/conversations/${conversationId}/messages`)
-        .then((res) => {
-          if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
-            onUpdate(res.data);
-            FirestoreChatService.cacheMessages(conversationId, res.data);
-          }
-        })
-        .catch(() => {});
+    const loadFromBackend = async () => {
+      try {
+        const res = await apiFetch<FirestoreMessage[]>(`/chat/conversations/${conversationId}/messages`);
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          const cached = await FirestoreChatService.getCachedMessages(conversationId);
+          const cachedMap = new Map(cached.map((m) => [m.id, m]));
+
+          const merged = res.data.map((m) => {
+            const local = cachedMap.get(m.id);
+            if (local?.isDeleted) {
+              return {
+                ...m,
+                isDeleted: true,
+                deletedAt: local.deletedAt || m.deletedAt,
+                text: 'This message was deleted',
+                imageUri: undefined,
+                voiceUrl: undefined,
+                voiceBase64: undefined,
+              };
+            }
+            if (local?.isEdited && local.editedAt && (!m.editedAt || new Date(local.editedAt) >= new Date(m.editedAt))) {
+              return {
+                ...m,
+                text: local.text,
+                isEdited: true,
+                editedAt: local.editedAt,
+              };
+            }
+            return m;
+          });
+
+          onUpdate(merged);
+          FirestoreChatService.cacheMessages(conversationId, merged);
+        }
+      } catch {}
     };
 
     loadFromBackend();
