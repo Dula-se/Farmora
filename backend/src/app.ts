@@ -37,14 +37,16 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 import { connectDB } from './config/database.js';
 
 // Ensure DB connection in Serverless environments (cold starts)
-app.use(async (_req: Request, _res: Response, next: NextFunction) => {
-  try {
-    await connectDB();
-  } catch (err) {
-    console.warn('[DB Middleware] Connection warning:', err instanceof Error ? err.message : err);
-  }
-  next();
-});
+if (config.nodeEnv !== 'test' && process.env.NODE_ENV !== 'test') {
+  app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+    try {
+      await connectDB();
+    } catch (err) {
+      console.warn('[DB Middleware] Connection warning:', err instanceof Error ? err.message : err);
+    }
+    next();
+  });
+}
 
 // Root Landing Endpoint (Confirms Vercel deployment status)
 app.get('/', (_req: Request, res: Response) => {

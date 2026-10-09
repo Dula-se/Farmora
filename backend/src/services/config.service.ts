@@ -59,6 +59,13 @@ export class AppConfigService {
   }
 
   /**
+   * Clear in-memory config cache
+   */
+  static clearCache(): void {
+    configCache.clear();
+  }
+
+  /**
    * Get Stripe configuration from database.
    * If not in database yet, falls back to env vars and seeds into DB.
    */

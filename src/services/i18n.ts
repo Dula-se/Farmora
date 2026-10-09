@@ -44,6 +44,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     error: 'Error',
 
     // Language selection
+    language: 'Language',
     selectLanguage: 'Choose Your Language',
     languageSubtitle: 'Select your preferred display language',
     languageNotice: 'You can change your language anytime in Settings',
@@ -161,6 +162,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     error: 'දෝෂයකි',
 
     // Language selection
+    language: 'භාෂාව',
     selectLanguage: 'ඔබේ භාෂාව තෝරන්න',
     languageSubtitle: 'යෙදුම භාවිතයට කැමති භාෂාව තෝරන්න',
     languageNotice: 'ඕනෑම වේලාවක සැකසුම් (Settings) තුළින් භාෂාව මාරු කළ හැක',
@@ -278,6 +280,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     error: 'பிழை',
 
     // Language selection
+    language: 'மொழி',
     selectLanguage: 'உங்கள் மொழியைத் தேர்வுசெய்க',
     languageSubtitle: 'பயன்படுத்த விரும்பும் மொழியைத் தேர்ந்தெடுக்கவும்',
     languageNotice: 'அமைப்புகளில் (Settings) எப்போது வேண்டுமானாலும் மாற்றலாம்',
