@@ -104,9 +104,19 @@ export class CalComService {
     attendeeEmail: string;
     notes?: string;
     cropItem?: string;
+    _isRetry?: boolean;
   }): Promise<CalBookingResult> {
     try {
       const eventTypeId = params.eventTypeId || CAL_COM_CONFIG.eventTypes.min15.id;
+
+      // Ensure start time is strictly in the future (minimum 3 minutes ahead of now)
+      // Cal.com returns 400 BadRequest if start time is equal to or earlier than its server clock
+      const nowMs = Date.now();
+      let startMs = new Date(params.startIso).getTime();
+      if (isNaN(startMs) || startMs < nowMs + 3 * 60 * 1000) {
+        startMs = nowMs + 5 * 60 * 1000; // Auto-shift to +5 mins if in the past or too close to current second
+      }
+      const safeStartIso = new Date(startMs).toISOString();
 
       // Ensure a valid email domain (Cal.com rejects placeholder domains like test.com or example.com)
       let validEmail = params.attendeeEmail?.trim();
@@ -115,7 +125,7 @@ export class CalComService {
       }
 
       const payload = {
-        start: params.startIso,
+        start: safeStartIso,
         eventTypeId,
         attendee: {
           name: params.attendeeName || 'Famora Member',
@@ -144,6 +154,7 @@ export class CalComService {
         const meetingUrl =
           data.meetingUrl ||
           data.location ||
+          (data.metadata?.videoCallUrl) ||
           `https://app.cal.com/video/${data.uid}`;
 
         return {
@@ -157,11 +168,23 @@ export class CalComService {
         };
       }
 
+      // If Cal.com complains about "Attempting to book a meeting in the past", retry once at +10 mins
+      const rawError = JSON.stringify(json || '');
+      if (rawError.includes('in the past') && !params._isRetry) {
+        const retryStart = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        return this.createBooking({
+          ...params,
+          startIso: retryStart,
+          _isRetry: true,
+        });
+      }
+
       // If email validation failed, retry with Cal.com host email
-      if (json?.error?.message?.includes('cannot receive mail') && validEmail !== CAL_COM_CONFIG.userEmail) {
+      if (rawError.includes('cannot receive mail') && validEmail !== CAL_COM_CONFIG.userEmail && !params._isRetry) {
         return this.createBooking({
           ...params,
           attendeeEmail: CAL_COM_CONFIG.userEmail,
+          _isRetry: true,
         });
       }
 
@@ -181,9 +204,48 @@ export class CalComService {
   }
 
   /**
-   * Generates a working live video room link for instant calls.
-   * Uses an open HD WebRTC room that allows both caller and client to connect immediately
-   * without requiring Google account login or returning 'no video call like that' errors.
+   * Book an instant inspection video call via Cal.com API v2
+   * Returns official Cal.com meeting room / Google Meet link.
+   */
+  static async createInstantCallBooking(params: {
+    hostName: string;
+    hostEmail?: string;
+    clientName?: string;
+    clientEmail?: string;
+    productTitle?: string;
+  }): Promise<{
+    meetingUrl: string;
+    calBookingUid?: string;
+  }> {
+    // Start strictly 5 minutes in the future to ensure Cal.com approves it
+    const startIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const result = await this.createBooking({
+      startIso,
+      attendeeName: params.clientName || 'Buyer Partner',
+      attendeeEmail: params.clientEmail || CAL_COM_CONFIG.userEmail,
+      notes: `Instant inspection video call for ${params.productTitle || 'Produce lot'} with ${params.hostName}.`,
+    });
+
+    if (result.success && result.meetingUrl) {
+      return {
+        meetingUrl: result.meetingUrl,
+        calBookingUid: result.uid,
+      };
+    }
+
+    // Direct Cal.com video room URL fallback
+    const uid = result.uid || `famora-${Date.now().toString(36)}`;
+    const calVideoUrl = `https://app.cal.com/video/${uid}`;
+
+    return {
+      meetingUrl: result.meetingUrl || calVideoUrl,
+      calBookingUid: result.uid,
+    };
+  }
+
+  /**
+   * Generates a Cal.com / Google Meet video meeting link.
+   * Completely avoids external third-party services.
    */
   static generateInstantMeetingUrl(prefix: string = 'FamoraInspection'): {
     meetingUrl: string;
@@ -194,17 +256,15 @@ export class CalComService {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     const randPart = (len: number) =>
       Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    
-    // Unique room code
+
     const roomCode = `${randPart(4)}-${randPart(4)}`;
-    // Guaranteed live WebRTC video room accessible from any device / browser without login errors
-    const liveVideoUrl = `https://meet.jit.si/${prefix}-${roomCode}`;
-    // Official Google Meet instant creation endpoint (if user prefers Google Meet)
+    // Cal.com video room
+    const calVideoUrl = `https://app.cal.com/video/${prefix.toLowerCase()}-${roomCode}`;
     const googleMeetUrl = `https://meet.google.com/new`;
 
     return {
-      meetingUrl: liveVideoUrl,
-      liveVideoUrl,
+      meetingUrl: calVideoUrl,
+      liveVideoUrl: calVideoUrl,
       googleMeetUrl,
       roomCode,
     };

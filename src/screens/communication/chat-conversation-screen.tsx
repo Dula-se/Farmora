@@ -824,9 +824,26 @@ export function ChatConversationScreen({
           text: 'Delete for Everyone',
           style: 'destructive',
           onPress: async () => {
+            const targetId = msg.id;
+            // Optimistic instant local update
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === targetId
+                  ? {
+                      ...m,
+                      isDeleted: true,
+                      deletedAt: new Date().toISOString(),
+                      text: 'This message was deleted',
+                      imageUri: undefined,
+                      voiceUrl: undefined,
+                      voiceBase64: undefined,
+                    }
+                  : m
+              )
+            );
             const res = await FirestoreChatService.deleteMessage({
               conversationId,
-              messageId: msg.id,
+              messageId: targetId,
             });
             if (!res.success) {
               Alert.alert('Error', res.error || 'Could not delete message.');
@@ -845,21 +862,32 @@ export function ChatConversationScreen({
       return;
     }
 
+    const targetMsgId = editingMsg.id;
+    const rawTime = editingMsg.rawTimestamp;
+
+    // Optimistic instant local update
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === targetMsgId
+          ? { ...m, text: trimmed, isEdited: true, editedAt: new Date().toISOString() }
+          : m
+      )
+    );
+    setEditModalVisible(false);
+    setEditingMsg(null);
+    setEditingText('');
+
     setUpdatingMsg(true);
     const res = await FirestoreChatService.editMessage({
       conversationId,
-      messageId: editingMsg.id,
+      messageId: targetMsgId,
       newText: trimmed,
-      rawTimestamp: editingMsg.rawTimestamp,
+      rawTimestamp: rawTime,
     });
     setUpdatingMsg(false);
 
     if (!res.success) {
       Alert.alert('Validation Error', res.error || 'Could not update message.');
-    } else {
-      setEditModalVisible(false);
-      setEditingMsg(null);
-      setEditingText('');
     }
   };
 
@@ -867,41 +895,54 @@ export function ChatConversationScreen({
 
   const handleInitiateVideoCall = async () => {
     if (!currentUser) return;
-    const instant = CalComService.generateInstantMeetingUrl();
-
-    // 1. Send the invitation in the conversation screen to the client to login/join
-    const callInvitation: FirestoreCallInvitation = {
-      callId: `call_${Date.now()}`,
-      meetingUrl: instant.meetingUrl,
-      hostName: currentUser.fullName || 'You',
-      hostAvatar: currentUser.avatarUrl,
-      mode: 'video',
-      type: 'instant',
-      status: 'active',
-      provider: 'google-video',
-    };
+    setSending(true);
 
     try {
+      // 1. Create real Cal.com video call booking (Google Meet / Cal Video)
+      const booking = await CalComService.createInstantCallBooking({
+        hostName: currentUser.fullName || 'Farmer',
+        hostEmail: currentUser.email,
+        clientName: otherUserName,
+        productTitle: productTitle || convMeta?.productTitle,
+      });
+
+      const meetingUrl = booking.meetingUrl;
+
+      // 2. Send invitation in conversation screen so client can tap and join
+      const callInvitation: FirestoreCallInvitation = {
+        callId: booking.calBookingUid || `call_${Date.now()}`,
+        meetingUrl,
+        hostName: currentUser.fullName || 'You',
+        hostAvatar: currentUser.avatarUrl,
+        mode: 'video',
+        type: 'instant',
+        status: 'active',
+        provider: 'google-video',
+      };
+
       await FirestoreChatService.sendMessage({
         conversationId,
         currentUser,
-        text: `📹 Video call started! Tap 'Join Video Call' below to enter the meeting.`,
+        text: `📹 Video call started via Cal.com! Tap 'Join Video Call' below to enter the meeting.`,
         callInvitation,
       });
-    } catch (err) {
-      console.warn('[Chat] Failed to send video call invitation:', err);
-    }
 
-    // 2. Suddenly navigates to the video meeting room!
-    try {
-      await Linking.openURL(instant.meetingUrl);
-    } catch {
-      Alert.alert('Video Call', `Call link: ${instant.meetingUrl}`);
-    }
+      // 3. Navigate host to the video meeting room
+      try {
+        await Linking.openURL(meetingUrl);
+      } catch {
+        Alert.alert('Video Call', `Call link: ${meetingUrl}`);
+      }
 
-    // 3. Keep parent flow synced
-    if (onStartVideoCall) {
-      onStartVideoCall(participantName, participantAvatar);
+      // 4. Keep parent flow synced
+      if (onStartVideoCall) {
+        onStartVideoCall(participantName, participantAvatar);
+      }
+    } catch (err: any) {
+      console.warn('[Chat] Failed to initiate video call:', err);
+      Alert.alert('Video Call Error', err?.message || 'Could not initiate video call.');
+    } finally {
+      setSending(false);
     }
   };
 

@@ -15,6 +15,10 @@ export interface IMessage extends Document {
   voiceBase64?: string;
   offer?: any;
   callInvitation?: any;
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +39,10 @@ const MessageSchema = new Schema<IMessage>(
     voiceBase64: { type: String },
     offer: { type: Schema.Types.Mixed },
     callInvitation: { type: Schema.Types.Mixed },
+    isEdited: { type: Boolean, default: false },
+    editedAt: { type: String },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: String },
   },
   { timestamps: true }
 );

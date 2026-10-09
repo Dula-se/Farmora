@@ -281,6 +281,10 @@ export class ChatController {
         voiceBase64: m.voiceBase64,
         offer: m.offer,
         callInvitation: m.callInvitation,
+        isEdited: !!m.isEdited,
+        editedAt: m.editedAt,
+        isDeleted: !!m.isDeleted,
+        deletedAt: m.deletedAt,
         createdAt: m.createdAt.toISOString(),
       }));
 
@@ -402,6 +406,121 @@ export class ChatController {
     } catch (err: any) {
       console.error('[ChatController] sendMessage error:', err);
       return sendError(res, err.message || 'Could not send message.', 500);
+    }
+  }
+
+  /**
+   * Edit a sent text message within 24 hours.
+   */
+  static async editMessage(req: Request, res: Response) {
+    try {
+      const conversationId = String(req.params.conversationId || '');
+      const messageId = String(req.params.messageId || '');
+      const { newText } = req.body;
+
+      if (!newText || !newText.trim()) {
+        return sendError(res, 'newText is required.', 400);
+      }
+
+      let msg: any = null;
+      if (mongoose.Types.ObjectId.isValid(messageId)) {
+        msg = await MessageModel.findById(messageId);
+      }
+      if (!msg) {
+        msg = await MessageModel.findOne({ $or: [{ _id: messageId as any }, { id: messageId }] });
+      }
+      if (!msg) {
+        return sendError(res, 'Message not found.', 404);
+      }
+
+      if (msg.isDeleted) {
+        return sendError(res, 'Cannot edit a deleted message.', 400);
+      }
+
+      // Check 24 hour limit
+      const msgDate = new Date(msg.createdAt).getTime();
+      if (!isNaN(msgDate)) {
+        const diffHours = (Date.now() - msgDate) / (1000 * 60 * 60);
+        if (diffHours > 24) {
+          return sendError(res, 'Messages older than 24 hours cannot be edited.', 400);
+        }
+      }
+
+      const trimmed = newText.trim();
+      const nowIso = new Date().toISOString();
+      msg.text = trimmed;
+      msg.isEdited = true;
+      msg.editedAt = nowIso;
+      await msg.save();
+
+      // Update conversation lastMessage
+      await ConversationModel.updateOne(
+        { conversationId },
+        { lastMessage: trimmed, updatedAt: new Date() }
+      ).catch(() => {});
+
+      return sendSuccess(
+        res,
+        {
+          id: msg._id.toString(),
+          text: msg.text,
+          isEdited: true,
+          editedAt: nowIso,
+        },
+        'Message updated successfully.'
+      );
+    } catch (err: any) {
+      console.error('[ChatController] editMessage error:', err);
+      return sendError(res, err.message || 'Could not edit message.', 500);
+    }
+  }
+
+  /**
+   * Delete a message for everyone.
+   */
+  static async deleteMessage(req: Request, res: Response) {
+    try {
+      const conversationId = String(req.params.conversationId || '');
+      const messageId = String(req.params.messageId || '');
+
+      let msg: any = null;
+      if (mongoose.Types.ObjectId.isValid(messageId)) {
+        msg = await MessageModel.findById(messageId);
+      }
+      if (!msg) {
+        msg = await MessageModel.findOne({ $or: [{ _id: messageId as any }, { id: messageId }] });
+      }
+      if (!msg) {
+        return sendError(res, 'Message not found.', 404);
+      }
+
+      const nowIso = new Date().toISOString();
+      msg.isDeleted = true;
+      msg.deletedAt = nowIso;
+      msg.text = 'This message was deleted';
+      msg.imageUri = undefined;
+      msg.voiceUrl = undefined;
+      msg.voiceBase64 = undefined;
+      await msg.save();
+
+      // Update conversation lastMessage
+      await ConversationModel.updateOne(
+        { conversationId },
+        { lastMessage: '🚫 This message was deleted', updatedAt: new Date() }
+      ).catch(() => {});
+
+      return sendSuccess(
+        res,
+        {
+          id: msg._id.toString(),
+          isDeleted: true,
+          deletedAt: nowIso,
+        },
+        'Message deleted successfully.'
+      );
+    } catch (err: any) {
+      console.error('[ChatController] deleteMessage error:', err);
+      return sendError(res, err.message || 'Could not delete message.', 500);
     }
   }
 }

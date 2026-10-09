@@ -84,8 +84,15 @@ export function ScheduleInspectionModal({
   onScheduled,
 }: ScheduleInspectionModalProps) {
   const upcomingDays = getUpcomingDays();
-  const [selectedDayObj, setSelectedDayObj] = useState(upcomingDays[0]);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[1]);
+  const now = new Date();
+  const futureSlotToday = TIME_SLOTS.find(
+    (s) => s.hour > now.getHours() || (s.hour === now.getHours() && s.min > now.getMinutes() + 15)
+  );
+  const defaultDay = futureSlotToday ? upcomingDays[0] : (upcomingDays[1] || upcomingDays[0]);
+  const defaultSlot = futureSlotToday || TIME_SLOTS[0];
+
+  const [selectedDayObj, setSelectedDayObj] = useState(defaultDay);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(defaultSlot);
   const [selectedEventType, setSelectedEventType] = useState<'15min' | '30min'>('15min');
   const [selectedChecklist, setSelectedChecklist] = useState<string[]>([
     'Harvest freshness & color grading',
@@ -121,6 +128,15 @@ export function ScheduleInspectionModal({
       const appointmentDate = new Date();
       appointmentDate.setFullYear(year, month - 1, day);
       appointmentDate.setHours(selectedTimeSlot.hour, selectedTimeSlot.min, 0, 0);
+
+      // Guard: if time is in the past, shift to tomorrow or +15 mins so Cal.com never rejects with "in the past"
+      if (appointmentDate.getTime() <= Date.now() + 3 * 60 * 1000) {
+        if (selectedDayObj.day === 'Today') {
+          appointmentDate.setDate(appointmentDate.getDate() + 1); // schedule for tomorrow at same time
+        } else {
+          appointmentDate.setTime(Date.now() + 15 * 60 * 1000);
+        }
+      }
 
       const startIso = appointmentDate.toISOString();
       const eventTypeId =
