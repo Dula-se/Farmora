@@ -174,7 +174,37 @@ const INITIAL_AUCTIONS: AuctionItem[] = [
 
 let auctionsCache: AuctionItem[] = [...INITIAL_AUCTIONS];
 
-function mapDbAuction(db: any): AuctionItem {
+function autoResolveExpiredAuctions(list: AuctionItem[]): AuctionItem[] {
+  const nowMs = Date.now();
+  let changed = false;
+  const updated = list.map((item) => {
+    const isTimeEnded = new Date(item.endTime).getTime() <= nowMs;
+    if (item.status === 'live' && isTimeEnded) {
+      changed = true;
+      const winnerId = item.highestBidderId || item.winnerId;
+      const winnerName = item.highestBidderName || item.winnerName;
+      return {
+        ...item,
+        status: 'ended' as const,
+        winnerId,
+        winnerName,
+        finalPricePerKg: item.currentBidPerKg,
+        winningTotalAmount: item.currentBidPerKg * item.lotSizeKg,
+      };
+    }
+    return item;
+  });
+  if (changed) {
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+  }
+  return updated;
+}
+
+function mapDbAuction(raw: any): AuctionItem {
+  const db = raw?.auction || raw || {};
+  const isEnded = db.status === 'ended' || db.status === 'paid' || (db.endTime && new Date(db.endTime).getTime() <= Date.now());
+  const effectiveStatus = db.status === 'paid' ? 'paid' : isEnded ? 'ended' : (db.status || 'live');
+
   return {
     id: db._id?.toString() || db.id || `auc-${Math.random()}`,
     _id: db._id?.toString() || db.id,
@@ -198,11 +228,11 @@ function mapDbAuction(db: any): AuctionItem {
     bids: db.bids || [],
     startTime: db.startTime || new Date().toISOString(),
     endTime: db.endTime || new Date(Date.now() + 3600000).toISOString(),
-    status: db.status || 'live',
-    winnerId: db.winnerId,
-    winnerName: db.winnerName,
-    finalPricePerKg: db.finalPricePerKg,
-    winningTotalAmount: db.winningTotalAmount,
+    status: effectiveStatus,
+    winnerId: db.winnerId || (isEnded ? db.highestBidderId : undefined),
+    winnerName: db.winnerName || (isEnded ? db.highestBidderName : undefined),
+    finalPricePerKg: db.finalPricePerKg || (isEnded ? db.currentBidPerKg : undefined),
+    winningTotalAmount: db.winningTotalAmount || (isEnded ? db.currentBidPerKg * (db.lotSizeKg || 500) : undefined),
     stripePaymentIntentId: db.stripePaymentIntentId,
     orderId: db.orderId,
     locationDistrict: db.locationDistrict || 'Sri Lanka',
@@ -216,22 +246,29 @@ export const AuctionService = {
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
-        auctionsCache = JSON.parse(stored);
+        auctionsCache = autoResolveExpiredAuctions(JSON.parse(stored));
       }
     } catch {}
   },
 
-  async getAuctions(params?: { status?: string; farmerId?: string }): Promise<AuctionItem[]> {
+  async getAuctions(params?: {
+    status?: string;
+    farmerId?: string;
+    tab?: string;
+    userId?: string;
+  }): Promise<AuctionItem[]> {
     try {
       let url = '/auctions';
       const q = new URLSearchParams();
       if (params?.status) q.append('status', params.status);
+      if (params?.tab) q.append('tab', params.tab);
+      if (params?.userId) q.append('userId', params.userId);
       if (params?.farmerId) q.append('farmerId', params.farmerId);
       if (q.toString()) url += `?${q.toString()}`;
 
       const res = await apiFetch<any[]>(url);
       if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-        const mapped = res.data.map(mapDbAuction);
+        const mapped = autoResolveExpiredAuctions(res.data.map(mapDbAuction));
         auctionsCache = mapped;
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(mapped)).catch(() => {});
         return mapped;
@@ -240,6 +277,7 @@ export const AuctionService = {
       console.warn('[AuctionService] getAuctions network error:', e);
     }
 
+    auctionsCache = autoResolveExpiredAuctions(auctionsCache);
     let filtered = [...auctionsCache];
     if (params?.status && params.status !== 'all') {
       filtered = filtered.filter((a) => a.status === params.status);
@@ -267,8 +305,12 @@ export const AuctionService = {
     const bidderId = user?.id || user?._id || 'buyer-sunil';
     const bidderName = user?.fullName || (user as any)?.name || 'Sunil Dissanayake';
 
+    const targetIdx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
+    const target = targetIdx !== -1 ? auctionsCache[targetIdx] : null;
+    const apiId = target?._id || target?.id || auctionId;
+
     try {
-      const res = await apiFetch<any>(`/auctions/${auctionId}/bid`, {
+      const res = await apiFetch<any>(`/auctions/${apiId}/bid`, {
         method: 'POST',
         body: JSON.stringify({
           bidderId,
@@ -279,8 +321,12 @@ export const AuctionService = {
 
       if (res.data) {
         const updated = mapDbAuction(res.data);
-        const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
-        if (idx !== -1) auctionsCache[idx] = updated;
+        const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId || a.id === updated.id);
+        if (idx !== -1) {
+          auctionsCache[idx] = updated;
+        } else {
+          auctionsCache.unshift(updated);
+        }
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
         sendLocalNotification(
           '🔨 Bid Placed Successfully',
@@ -295,12 +341,12 @@ export const AuctionService = {
 
     const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
     if (idx !== -1) {
-      const target = auctionsCache[idx];
-      if (bidAmountPerKg <= target.currentBidPerKg) {
-        throw new Error(`Bid must be higher than current bid (Rs. ${target.currentBidPerKg})`);
+      const current = auctionsCache[idx];
+      if (bidAmountPerKg <= current.currentBidPerKg) {
+        throw new Error(`Bid must be higher than current bid (Rs. ${current.currentBidPerKg})`);
       }
 
-      const totalLotAmount = bidAmountPerKg * target.lotSizeKg;
+      const totalLotAmount = bidAmountPerKg * current.lotSizeKg;
       const newBid: BidRecord = {
         bidderId,
         bidderName,
@@ -310,21 +356,21 @@ export const AuctionService = {
       };
 
       // Anti-sniping: extend timer if less than 2 mins remaining
-      const endTimestamp = new Date(target.endTime).getTime();
+      const endTimestamp = new Date(current.endTime).getTime();
       const timeLeft = endTimestamp - Date.now();
-      let updatedEndTime = target.endTime;
+      let updatedEndTime = current.endTime;
       if (timeLeft > 0 && timeLeft < 2 * 60 * 1000) {
         updatedEndTime = new Date(endTimestamp + 3 * 60 * 1000).toISOString();
       }
 
-      target.currentBidPerKg = bidAmountPerKg;
-      target.highestBidderId = bidderId;
-      target.highestBidderName = bidderName;
-      target.bidsCount = (target.bidsCount || 0) + 1;
-      target.bids = [newBid, ...(target.bids || [])];
-      target.endTime = updatedEndTime;
+      current.currentBidPerKg = bidAmountPerKg;
+      current.highestBidderId = bidderId;
+      current.highestBidderName = bidderName;
+      current.bidsCount = (current.bidsCount || 0) + 1;
+      current.bids = [newBid, ...(current.bids || [])];
+      current.endTime = updatedEndTime;
 
-      auctionsCache[idx] = { ...target };
+      auctionsCache[idx] = { ...current };
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
       return auctionsCache[idx];
     }
@@ -333,15 +379,20 @@ export const AuctionService = {
   },
 
   async finalizeWonAuction(auctionId: string, stripePaymentIntentId: string): Promise<AuctionItem> {
+    const targetIdx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
+    const target = targetIdx !== -1 ? auctionsCache[targetIdx] : null;
+    const apiId = target?._id || target?.id || auctionId;
+
     try {
-      const res = await apiFetch<any>(`/auctions/${auctionId}/finalize`, {
+      const res = await apiFetch<any>(`/auctions/${apiId}/finalize`, {
         method: 'POST',
         body: JSON.stringify({ stripePaymentIntentId }),
       });
       if (res.data) {
         const updated = mapDbAuction(res.data);
-        const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
+        const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId || a.id === updated.id);
         if (idx !== -1) auctionsCache[idx] = updated;
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
         return updated;
       }
     } catch {}

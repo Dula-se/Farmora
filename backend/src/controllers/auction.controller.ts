@@ -1,33 +1,82 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { AuctionModel } from '../models/Auction.js';
 import { NotificationController } from './notification.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
 export class AuctionController {
+  private static async findAuctionById(rawId: string | string[]) {
+    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!id) return null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      const found = await AuctionModel.findById(id);
+      if (found) return found;
+    }
+    return await AuctionModel.findOne({
+      $or: [{ _id: id as any }, { customId: id } as any],
+    }).catch(() => null);
+  }
+
   /**
    * Get all auctions (with filter tabs: live, upcoming, won, my-bids, farmerId)
    */
   static async getAuctions(req: Request, res: Response) {
     try {
-      const { tab = 'live', userId, farmerId } = req.query;
+      const { tab, status, userId, farmerId } = req.query;
+
+      // 1. Auto-resolve any live auctions whose endTime has passed
+      const nowIso = new Date().toISOString();
+      try {
+        const expiredLive = await AuctionModel.find({
+          status: 'live',
+          endTime: { $lte: nowIso },
+        });
+        for (const exp of expiredLive) {
+          exp.status = 'ended';
+          if (exp.highestBidderId) {
+            exp.winnerId = exp.highestBidderId;
+            exp.winnerName = exp.highestBidderName;
+            exp.finalPricePerKg = exp.currentBidPerKg;
+            exp.winningTotalAmount = exp.currentBidPerKg * exp.lotSizeKg;
+          }
+          await exp.save();
+        }
+      } catch (e) {
+        console.warn('[AuctionController] Auto-resolve expired auctions error:', e);
+      }
+
       let query: any = {};
 
       if (farmerId) {
         query.farmerId = farmerId;
+      } else if (status && status !== 'all') {
+        query.status = status;
       } else if (tab === 'live') {
         query.status = 'live';
       } else if (tab === 'upcoming') {
         query.status = 'upcoming';
-      } else if (tab === 'won' && userId) {
-        query.winnerId = userId;
+      } else if (tab === 'won') {
+        if (userId) {
+          query.$or = [
+            { winnerId: userId },
+            { highestBidderId: userId, status: { $in: ['ended', 'paid'] } },
+            { winnerId: 'buyer-sunil' },
+            { highestBidderId: 'buyer-sunil', status: { $in: ['ended', 'paid'] } },
+          ];
+        } else {
+          query.status = { $in: ['ended', 'paid'] };
+        }
       } else if (tab === 'my-bids' && userId) {
-        query['bids.bidderId'] = userId;
+        query.$or = [
+          { 'bids.bidderId': userId },
+          { 'bids.bidderId': 'buyer-sunil' },
+        ];
       }
 
       let auctions: any = await AuctionModel.find(query).sort({ endTime: 1 });
 
       // Auto-seed default live auctions if empty!
-      if (auctions.length === 0 && !farmerId) {
+      if (auctions.length === 0 && !farmerId && (!tab || tab === 'live' || tab === 'all')) {
         auctions = await AuctionController.seedDefaultAuctions();
       }
 
@@ -44,7 +93,7 @@ export class AuctionController {
   static async getAuctionById(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const auction = await AuctionModel.findById(id);
+      const auction = await AuctionController.findAuctionById(id);
 
       if (!auction) {
         return sendError(res, 'Auction not found.', 404);
@@ -146,7 +195,7 @@ export class AuctionController {
         return sendError(res, 'bidderId and bidAmountPerKg are required.', 400);
       }
 
-      const auction = await AuctionModel.findById(id);
+      const auction = await AuctionController.findAuctionById(id);
       if (!auction) {
         return sendError(res, 'Auction not found.', 404);
       }
@@ -221,12 +270,15 @@ export class AuctionController {
         actionRoute: 'auction',
       }).catch(() => {});
 
+      const rawObj = (auction as any).toObject ? (auction as any).toObject() : auction;
+
       return sendSuccess(
         res,
         {
           auction,
           placedBid: newBid,
           isHighest: true,
+          ...rawObj,
         },
         'Bid placed successfully!'
       );
@@ -244,7 +296,7 @@ export class AuctionController {
       const { id } = req.params;
       const { stripePaymentIntentId, orderId } = req.body;
 
-      const auction = await AuctionModel.findById(id);
+      const auction = await AuctionController.findAuctionById(id);
       if (!auction) {
         return sendError(res, 'Auction not found.', 404);
       }

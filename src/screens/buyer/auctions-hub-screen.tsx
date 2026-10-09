@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Platform,
   Pressable,
@@ -14,6 +15,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { AuctionService, AuctionItem, AuctionStatus } from '@/services/auction-service';
+import { getStoredUser } from '@/services/api';
+import { StripePaymentModal } from './stripe-payment-modal';
 
 interface AuctionsHubScreenProps {
   onBack: () => void;
@@ -29,10 +32,19 @@ export function AuctionsHubScreen({
   onCreateAuctionPress,
 }: AuctionsHubScreenProps) {
   const insets = useSafeAreaInsets();
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<TabType>('live');
   const [auctions, setAuctions] = useState<AuctionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
+  const [payAuction, setPayAuction] = useState<AuctionItem | null>(null);
+  const [showStripeModal, setShowStripeModal] = useState(false);
+
+  useEffect(() => {
+    getStoredUser().then((u) => {
+      if (u) setCurrentUser(u);
+    });
+  }, []);
 
   // Re-render every second for real-time countdown clocks
   useEffect(() => {
@@ -44,20 +56,37 @@ export function AuctionsHubScreen({
 
   useEffect(() => {
     loadAuctions();
-  }, [activeTab]);
+  }, [activeTab, currentUser]);
 
   const loadAuctions = async () => {
     setLoading(true);
     try {
+      const currentUserId = currentUser?.id || currentUser?._id || 'buyer-sunil';
       const data = await AuctionService.getAuctions(
         activeTab === 'live' || activeTab === 'upcoming'
           ? { status: activeTab }
+          : activeTab === 'won' || activeTab === 'my-bids'
+          ? { tab: activeTab, userId: currentUserId }
           : undefined
       );
       setAuctions(data);
     } catch {
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleStripeSuccess = async (paymentIntentId: string) => {
+    if (!payAuction) return;
+    setShowStripeModal(false);
+    try {
+      const updated = await AuctionService.finalizeWonAuction(payAuction.id, paymentIntentId);
+      setAuctions((prev) => prev.map((a) => (a.id === updated.id || a.id === payAuction.id ? updated : a)));
+      Alert.alert('Payment Complete', 'Wholesale produce lot purchased successfully via Stripe!');
+    } catch {
+      Alert.alert('Finalize Error', 'Payment processed, but order sync encountered an issue.');
+    } finally {
+      setPayAuction(null);
     }
   };
 
@@ -75,14 +104,51 @@ export function AuctionsHubScreen({
     return `${pad(mins)}m ${pad(secs)}s`;
   };
 
+  const currentUserId = currentUser?.id || currentUser?._id || 'buyer-sunil';
+  const currentUserName = (currentUser?.fullName || currentUser?.name || 'Sunil Dissanayake').toLowerCase();
+
+  const isUserBidder = (a: AuctionItem) => {
+    return (
+      a.highestBidderId === currentUserId ||
+      a.highestBidderId === 'buyer-sunil' ||
+      a.winnerId === currentUserId ||
+      a.winnerId === 'buyer-sunil' ||
+      a.bids.some(
+        (b) =>
+          (b.bidderId && (b.bidderId === currentUserId || b.bidderId === 'buyer-sunil')) ||
+          (b.bidderName && (b.bidderName.toLowerCase().includes(currentUserName) || b.bidderName.toLowerCase().includes('sunil')))
+      )
+    );
+  };
+
+  const isUserWinner = (a: AuctionItem) => {
+    const isEnded = a.status === 'ended' || a.status === 'paid' || new Date(a.endTime).getTime() <= Date.now();
+    if (!isEnded && a.status !== 'paid') return false;
+
+    const matchId =
+      (a.winnerId && (a.winnerId === currentUserId || a.winnerId === 'buyer-sunil')) ||
+      (a.highestBidderId && (a.highestBidderId === currentUserId || a.highestBidderId === 'buyer-sunil')) ||
+      (a.bids?.length > 0 && (a.bids[0].bidderId === currentUserId || a.bids[0].bidderId === 'buyer-sunil'));
+
+    const matchName =
+      (a.winnerName && (a.winnerName.toLowerCase().includes(currentUserName) || a.winnerName.toLowerCase().includes('sunil'))) ||
+      (a.highestBidderName && (a.highestBidderName.toLowerCase().includes(currentUserName) || a.highestBidderName.toLowerCase().includes('sunil'))) ||
+      (a.bids?.length > 0 && (a.bids[0].bidderName.toLowerCase().includes(currentUserName) || a.bids[0].bidderName.toLowerCase().includes('sunil')));
+
+    return Boolean(matchId || matchName || a.status === 'paid');
+  };
+
   const displayedAuctions = auctions.filter((a) => {
-    if (activeTab === 'live') return a.status === 'live';
+    if (activeTab === 'live') {
+      const isPast = new Date(a.endTime).getTime() <= Date.now();
+      return a.status === 'live' && !isPast;
+    }
     if (activeTab === 'upcoming') return a.status === 'upcoming';
     if (activeTab === 'my-bids') {
-      return a.bids.some((b) => b.bidderName.includes('Sunil') || b.bidderId.includes('sunil'));
+      return isUserBidder(a);
     }
     if (activeTab === 'won') {
-      return a.status === 'paid' || a.highestBidderId === 'buyer-sunil' || a.winnerId === 'buyer-sunil';
+      return isUserWinner(a);
     }
     return true;
   });
@@ -173,14 +239,28 @@ export function AuctionsHubScreen({
           <ActivityIndicator size="large" color="#2E7D32" style={{ marginVertical: 40 }} />
         ) : displayedAuctions.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>No Auctions Found</Text>
-            <Text style={styles.emptySub}>Check back shortly for upcoming farm harvest lots.</Text>
+            <Text style={styles.emptyTitle}>
+              {activeTab === 'won'
+                ? 'No Won Lots Yet'
+                : activeTab === 'my-bids'
+                ? 'No Bids Placed Yet'
+                : 'No Auctions Found'}
+            </Text>
+            <Text style={styles.emptySub}>
+              {activeTab === 'won'
+                ? 'When your bids win an auction lot, they will appear here with the option to pay and buy.'
+                : activeTab === 'my-bids'
+                ? 'Auctions where you participate with bids will show here for fast tracking.'
+                : 'Check back shortly for upcoming farm harvest lots.'}
+            </Text>
           </View>
         ) : (
           displayedAuctions.map((item) => {
             const countdownStr = formatCountdown(item.endTime);
             const isLive = item.status === 'live';
             const totalLotValue = item.currentBidPerKg * item.lotSizeKg;
+            const isWon = activeTab === 'won' || isUserWinner(item);
+            const isPaid = item.status === 'paid';
 
             return (
               <Pressable
@@ -194,10 +274,26 @@ export function AuctionsHubScreen({
 
                   {/* Status / Countdown Overlay */}
                   <View style={styles.overlayTopRow}>
-                    <View style={isLive ? styles.badgeLive : styles.badgeUpcoming}>
-                      {isLive && <View style={styles.innerPulse} />}
+                    <View
+                      style={
+                        isWon
+                          ? isPaid
+                            ? styles.badgePaid
+                            : styles.badgeWon
+                          : isLive
+                          ? styles.badgeLive
+                          : styles.badgeUpcoming
+                      }
+                    >
+                      {isLive && !isWon && <View style={styles.innerPulse} />}
                       <Text style={styles.badgeText}>
-                        {isLive ? 'LIVE BIDDING' : 'UPCOMING'}
+                        {isWon
+                          ? isPaid
+                            ? 'PAID & SECURED'
+                            : '🏆 YOU WON LOT'
+                          : isLive
+                          ? 'LIVE BIDDING'
+                          : 'UPCOMING'}
                       </Text>
                     </View>
 
@@ -206,7 +302,13 @@ export function AuctionsHubScreen({
                         <Circle cx={12} cy={12} r={10} />
                         <Path d="M12 6v6l4 2" />
                       </Svg>
-                      <Text style={styles.timerText}>{countdownStr}</Text>
+                      <Text style={styles.timerText}>
+                        {isWon
+                          ? isPaid
+                            ? 'Order Verified'
+                            : 'Payment Required'
+                          : countdownStr}
+                      </Text>
                     </View>
                   </View>
 
@@ -229,11 +331,30 @@ export function AuctionsHubScreen({
                     By {item.farmerName} • {item.farmerFarm}
                   </Text>
 
+                  {/* Won Lot Celebration Banner on Card */}
+                  {isWon && (
+                    <View style={isPaid ? styles.wonBannerPaid : styles.wonBannerPending}>
+                      <Text style={styles.wonBannerIcon}>{isPaid ? '✅' : '🎉'}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={isPaid ? styles.wonBannerTextPaid : styles.wonBannerTextPending}>
+                          {isPaid
+                            ? 'Lot Purchased & Paid via Stripe'
+                            : 'Congratulations! You won this produce lot.'}
+                        </Text>
+                        <Text style={styles.wonBannerSub}>
+                          {isPaid
+                            ? 'Order is confirmed and being prepared for delivery.'
+                            : 'Complete payment to finalize order and buy your wholesale produce lot.'}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
                   {/* Bidding Summary Box */}
                   <View style={styles.biddingBox}>
                     <View>
                       <Text style={styles.bidLabel}>
-                        {item.bidsCount > 0 ? 'CURRENT HIGHEST BID' : 'STARTING PRICE'}
+                        {isWon ? 'WINNING PRICE' : item.bidsCount > 0 ? 'CURRENT HIGHEST BID' : 'STARTING PRICE'}
                       </Text>
                       <Text style={styles.bidAmount}>
                         Rs. {item.currentBidPerKg}
@@ -248,14 +369,37 @@ export function AuctionsHubScreen({
                       <View style={styles.bidCountBadge}>
                         <Text style={styles.bidCountText}>{item.bidsCount} Bids Placed</Text>
                       </View>
-                      <Pressable
-                        style={styles.enterRoomBtn}
-                        onPress={() => onSelectAuction(item)}
-                      >
-                        <Text style={styles.enterRoomBtnText}>
-                          {isLive ? 'Bid Live' : 'View Details'}
-                        </Text>
-                      </Pressable>
+                      {isWon && !isPaid ? (
+                        <Pressable
+                          style={styles.payNowBtn}
+                          onPress={() => {
+                            setPayAuction(item);
+                            setShowStripeModal(true);
+                          }}
+                        >
+                          <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2}>
+                            <Rect x={1} y={4} width={22} height={16} rx={2} ry={2} />
+                            <Path d="M1 10h22" />
+                          </Svg>
+                          <Text style={styles.payNowBtnText}>Pay & Buy</Text>
+                        </Pressable>
+                      ) : isWon && isPaid ? (
+                        <Pressable
+                          style={styles.viewWonBtn}
+                          onPress={() => onSelectAuction(item)}
+                        >
+                          <Text style={styles.viewWonBtnText}>View Receipt</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={styles.enterRoomBtn}
+                          onPress={() => onSelectAuction(item)}
+                        >
+                          <Text style={styles.enterRoomBtnText}>
+                            {isLive ? 'Bid Live' : 'View Details'}
+                          </Text>
+                        </Pressable>
+                      )}
                     </View>
                   </View>
                 </View>
@@ -266,6 +410,22 @@ export function AuctionsHubScreen({
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Direct Stripe Checkout for Won Lots */}
+      {payAuction && (
+        <StripePaymentModal
+          visible={showStripeModal}
+          amount={payAuction.currentBidPerKg * payAuction.lotSizeKg}
+          paymentType="auction_win"
+          title="Wholesale Auction Payment"
+          description={`Payment for won lot: ${payAuction.lotSizeKg} kg of ${payAuction.cropName}`}
+          onClose={() => {
+            setShowStripeModal(false);
+            setPayAuction(null);
+          }}
+          onSuccess={handleStripeSuccess}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -568,5 +728,84 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: '#FFFFFF',
+  },
+  badgeWon: {
+    backgroundColor: '#15803D',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  badgePaid: {
+    backgroundColor: '#047857',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  wonBannerPending: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 12,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  wonBannerPaid: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 12,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  wonBannerIcon: {
+    fontSize: 20,
+  },
+  wonBannerTextPending: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#166534',
+  },
+  wonBannerTextPaid: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#065F46',
+  },
+  wonBannerSub: {
+    fontSize: 11,
+    color: '#475569',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  payNowBtn: {
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  payNowBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  viewWonBtn: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  viewWonBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#15803D',
   },
 });

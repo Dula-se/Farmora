@@ -15,6 +15,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { AuctionItem, AuctionService } from '@/services/auction-service';
+import { getStoredUser } from '@/services/api';
 import { StripePaymentModal } from './stripe-payment-modal';
 
 interface AuctionRoomScreenProps {
@@ -29,12 +30,19 @@ export function AuctionRoomScreen({
   onAuctionUpdated,
 }: AuctionRoomScreenProps) {
   const insets = useSafeAreaInsets();
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [auction, setAuction] = useState<AuctionItem>(initialAuction);
   const [bidPerKg, setBidPerKg] = useState<number>(initialAuction.currentBidPerKg + 5);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   const [tick, setTick] = useState(0);
   const [showStripeModal, setShowStripeModal] = useState(false);
   const [showWonModal, setShowWonModal] = useState(false);
+
+  useEffect(() => {
+    getStoredUser().then((u) => {
+      if (u) setCurrentUser(u);
+    });
+  }, []);
 
   // 1-second countdown interval
   useEffect(() => {
@@ -101,7 +109,20 @@ export function AuctionRoomScreen({
     }
   };
 
-  const isHighestBidder = auction.highestBidderId === 'buyer-sunil';
+  const currentUserId = currentUser?.id || currentUser?._id || 'buyer-sunil';
+  const currentUserName = (currentUser?.fullName || currentUser?.name || 'Sunil Dissanayake').toLowerCase();
+
+  const isHighestBidder =
+    (auction.highestBidderId && (auction.highestBidderId === currentUserId || auction.highestBidderId === 'buyer-sunil')) ||
+    (auction.winnerId && (auction.winnerId === currentUserId || auction.winnerId === 'buyer-sunil')) ||
+    (auction.highestBidderName && (auction.highestBidderName.toLowerCase() === currentUserName || auction.highestBidderName.toLowerCase().includes('sunil'))) ||
+    (auction.winnerName && (auction.winnerName.toLowerCase() === currentUserName || auction.winnerName.toLowerCase().includes('sunil'))) ||
+    (auction.bids?.length > 0 && (
+      auction.bids[0].bidderId === currentUserId ||
+      auction.bids[0].bidderId === 'buyer-sunil' ||
+      auction.bids[0].bidderName.toLowerCase() === currentUserName ||
+      auction.bids[0].bidderName.toLowerCase().includes('sunil')
+    ));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -140,20 +161,64 @@ export function AuctionRoomScreen({
           </Text>
         </View>
 
-        {/* Won Banner (if user won) */}
-        {isHighestBidder && (
+        {/* Won Celebration Banner or Highest Bidder Indicator */}
+        {isEnded && isHighestBidder ? (
+          <View style={styles.wonCelebrationCard}>
+            <View style={styles.wonTrophyRow}>
+              <Text style={styles.wonTrophyIcon}>🏆</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.wonCelebrationTitle}>You Won This Produce Lot!</Text>
+                <Text style={styles.wonCelebrationSub}>
+                  {auction.status === 'paid'
+                    ? 'Payment verified via Stripe • Order confirmed for dispatch'
+                    : 'Your final bid was the highest. Complete payment to secure and buy your produce.'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.wonSummaryBox}>
+              <View style={styles.wonSummaryCol}>
+                <Text style={styles.wonSummaryLabel}>WINNING BID</Text>
+                <Text style={styles.wonSummaryValue}>Rs. {auction.currentBidPerKg} / kg</Text>
+              </View>
+              <View style={styles.wonSummaryDivider} />
+              <View style={styles.wonSummaryCol}>
+                <Text style={styles.wonSummaryLabel}>LOT SIZE</Text>
+                <Text style={styles.wonSummaryValue}>{auction.lotSizeKg.toLocaleString()} {auction.unit}</Text>
+              </View>
+              <View style={styles.wonSummaryDivider} />
+              <View style={styles.wonSummaryCol}>
+                <Text style={styles.wonSummaryLabel}>TOTAL AMOUNT</Text>
+                <Text style={styles.wonSummaryHighlight}>Rs. {currentTotal.toLocaleString()}</Text>
+              </View>
+            </View>
+
+            {auction.status !== 'paid' ? (
+              <Pressable style={styles.wonPayHeroBtn} onPress={handlePayWonLot}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.2}>
+                  <Rect x={1} y={4} width={22} height={16} rx={2} ry={2} />
+                  <Path d="M1 10h22" />
+                </Svg>
+                <Text style={styles.wonPayHeroBtnText}>
+                  Pay Rs. {currentTotal.toLocaleString()} & Buy Lot via Stripe
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={styles.wonPaidHeroBadge}>
+                <Text style={styles.wonPaidHeroBadgeText}>
+                  ✅ Lot Purchased & Paid Successfully
+                </Text>
+              </View>
+            )}
+          </View>
+        ) : !isEnded && isHighestBidder ? (
           <View style={styles.leaderBanner}>
             <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#15803D" strokeWidth={2.5}>
               <Path d="M20 6L9 17l-5-5" />
             </Svg>
             <Text style={styles.leaderBannerText}>You are currently the Highest Bidder!</Text>
-            {isEnded && auction.status !== 'paid' && (
-              <Pressable style={styles.payNowMiniBtn} onPress={handlePayWonLot}>
-                <Text style={styles.payNowMiniBtnText}>Pay with Stripe</Text>
-              </Pressable>
-            )}
           </View>
-        )}
+        ) : null}
 
         {/* Produce Overview Card */}
         <View style={styles.card}>
@@ -274,13 +339,25 @@ export function AuctionRoomScreen({
             </Pressable>
           </View>
         </View>
-      ) : isHighestBidder && auction.status !== 'paid' ? (
+      ) : isEnded ? (
         <View style={[styles.bottomBiddingBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <Pressable style={styles.wonPayBtn} onPress={handlePayWonLot}>
-            <Text style={styles.wonPayBtnText}>
-              You Won! Pay Rs. {currentTotal.toLocaleString()} via Stripe
-            </Text>
-          </Pressable>
+          {isHighestBidder && auction.status !== 'paid' ? (
+            <Pressable style={styles.wonPayBtn} onPress={handlePayWonLot}>
+              <Text style={styles.wonPayBtnText}>
+                You Won! Pay Rs. {currentTotal.toLocaleString()} via Stripe
+              </Text>
+            </Pressable>
+          ) : isHighestBidder && auction.status === 'paid' ? (
+            <View style={styles.paidConfirmedBar}>
+              <Text style={styles.paidConfirmedText}>✅ Paid & Order Confirmed via Stripe</Text>
+            </View>
+          ) : (
+            <View style={styles.endedInfoBar}>
+              <Text style={styles.endedInfoText}>
+                Auction Ended • Winning Bid: Rs. {auction.currentBidPerKg}/kg
+              </Text>
+            </View>
+          )}
         </View>
       ) : null}
 
@@ -707,5 +784,131 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+  wonCelebrationCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    borderRadius: 18,
+    padding: 16,
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  wonTrophyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  wonTrophyIcon: {
+    fontSize: 34,
+  },
+  wonCelebrationTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#14532D',
+  },
+  wonCelebrationSub: {
+    fontSize: 12,
+    color: '#166534',
+    marginTop: 2,
+    lineHeight: 17,
+  },
+  wonSummaryBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    marginBottom: 14,
+  },
+  wonSummaryCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  wonSummaryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E2E8F0',
+  },
+  wonSummaryLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  wonSummaryValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  wonSummaryHighlight: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#15803D',
+  },
+  wonPayHeroBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#16A34A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    shadowColor: '#15803D',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  wonPayHeroBtnText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  wonPaidHeroBadge: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  wonPaidHeroBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  paidConfirmedBar: {
+    backgroundColor: '#DCFCE7',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  paidConfirmedText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  endedInfoBar: {
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  endedInfoText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#475569',
   },
 });
