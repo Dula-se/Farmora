@@ -6,10 +6,10 @@ import { ProduceCategory, ProduceUnit } from '../types/index.js';
 
 export const createProduceSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters'),
-  category: z.enum(['vegetables', 'fruits', 'grains', 'spices', 'organic', 'tea', 'other']),
+  category: z.enum(['vegetables', 'fruits', 'grains', 'spices', 'herbs', 'organic', 'tea', 'other']),
   description: z.string().min(10, 'Description must be at least 10 characters'),
   pricePerUnit: z.number().positive('Price must be greater than zero'),
-  unit: z.enum(['kg', 'g', 'bundle', 'crate', 'item']).default('kg'),
+  unit: z.enum(['kg', 'g', 'bundle', 'crate', 'item', 'unit', 'bunch']).default('kg'),
   availableQuantity: z.number().positive('Available quantity must be greater than zero'),
   minimumOrderQuantity: z.number().positive().default(1),
   harvestDate: z.string().optional(),
@@ -21,10 +21,10 @@ export const createProduceSchema = z.object({
 
 export const updateProduceSchema = z.object({
   title: z.string().min(3).optional(),
-  category: z.enum(['vegetables', 'fruits', 'grains', 'spices', 'organic', 'tea', 'other']).optional(),
+  category: z.enum(['vegetables', 'fruits', 'grains', 'spices', 'herbs', 'organic', 'tea', 'other']).optional(),
   description: z.string().min(10).optional(),
   pricePerUnit: z.number().positive().optional(),
-  unit: z.enum(['kg', 'g', 'bundle', 'crate', 'item']).optional(),
+  unit: z.enum(['kg', 'g', 'bundle', 'crate', 'item', 'unit', 'bunch']).optional(),
   availableQuantity: z.number().nonnegative().optional(),
   minimumOrderQuantity: z.number().positive().optional(),
   harvestDate: z.string().optional(),

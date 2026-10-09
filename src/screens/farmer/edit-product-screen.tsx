@@ -31,15 +31,21 @@ export const EditProductScreen: React.FC<EditProductScreenProps> = ({
   const [category, setCategory] = useState(product.category || 'vegetables');
   const [description, setDescription] = useState(product.description || '');
   const [farmingMethod, setFarmingMethod] = useState<'organic' | 'conventional' | 'greenhouse'>('organic');
-  const [availableQuantity, setAvailableQuantity] = useState(String(product.availableQuantity || '150'));
-  const [pricePerUnit, setPricePerUnit] = useState(String(product.pricePerUnit || '350'));
-  const [minOrderQty, setMinOrderQty] = useState(String(product.minimumOrderQuantity || '10'));
-  const [harvestDate, setHarvestDate] = useState(product.harvestDate || '2026-10-08');
+  const [availableQuantity, setAvailableQuantity] = useState(
+    product.availableQuantity !== undefined ? String(product.availableQuantity) : '0'
+  );
+  const [pricePerUnit, setPricePerUnit] = useState(
+    product.pricePerUnit !== undefined ? String(product.pricePerUnit) : '0'
+  );
+  const [minOrderQty, setMinOrderQty] = useState(
+    product.minimumOrderQuantity !== undefined ? String(product.minimumOrderQuantity) : '1'
+  );
+  const [harvestDate, setHarvestDate] = useState(
+    product.harvestDate || new Date().toISOString().split('T')[0]
+  );
   const [qualityGrade, setQualityGrade] = useState('Grade A+');
   const [images, setImages] = useState<string[]>(
-    product.images && product.images.length > 0
-      ? product.images
-      : ['https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=400&auto=format&fit=crop&q=80']
+    product.images && product.images.length > 0 ? product.images : []
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 

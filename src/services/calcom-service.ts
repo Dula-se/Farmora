@@ -7,12 +7,12 @@
  */
 
 export const CAL_COM_CONFIG = {
-  apiKey: 'cal_live_0096a83db97c048dc7efac6e2a6118df',
-  username: 'pasindu-palinda-6o8dxr',
-  userEmail: 'palindapasindu@gmail.com',
-  userName: 'Pasindu Palinda',
+  apiKey: process.env.EXPO_PUBLIC_CAL_COM_API_KEY || 'cal_live_0096a83db97c048dc7efac6e2a6118df',
+  username: process.env.EXPO_PUBLIC_CAL_COM_USERNAME || 'pasindu-palinda-6o8dxr',
+  userEmail: process.env.EXPO_PUBLIC_CAL_COM_EMAIL || 'palindapasindu@gmail.com',
+  userName: process.env.EXPO_PUBLIC_CAL_COM_NAME || 'Pasindu Palinda',
   baseUrl: 'https://api.cal.com/v2',
-  publicBookingBase: 'https://cal.com/pasindu-palinda-6o8dxr',
+  publicBookingBase: `https://cal.com/${process.env.EXPO_PUBLIC_CAL_COM_USERNAME || 'pasindu-palinda-6o8dxr'}`,
   eventTypes: {
     min15: {
       id: 7417946,

@@ -14,7 +14,7 @@ export const config = {
     dbName: process.env.MONGODB_DB_NAME || 'farmora',
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'famora_dev_secret_key_change_me_in_prod',
+    secret: process.env.JWT_SECRET || (process.env.VERCEL || process.env.NODE_ENV === 'production' ? '' : 'famora_dev_secret_key'),
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   upload: {
@@ -40,5 +40,13 @@ export const config = {
     bucket: process.env.AWS_S3_BUCKET || '',
     endpoint: process.env.AWS_S3_ENDPOINT || '',
   },
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY || '',
+    publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  },
 };
+
+if ((process.env.VERCEL || process.env.NODE_ENV === 'production') && !process.env.JWT_SECRET) {
+  console.warn('[Security] ⚠️ JWT_SECRET environment variable is not defined in Vercel. Please add JWT_SECRET in your Vercel Project Settings.');
+}
 

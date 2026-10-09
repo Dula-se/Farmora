@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,46 +39,90 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const [submitting, setSubmitting] = useState(false);
 
-  // Form State — Step 1: Basic Info (Screen 6)
+  // Form State — Step 1: Basic Info (Starts clean, no unwanted prefilled mock product)
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('vegetables');
   const [description, setDescription] = useState('');
   const [farmingMethod, setFarmingMethod] = useState<'Conventional' | '100% Organic' | 'Hydroponic'>('100% Organic');
-  const [images, setImages] = useState<string[]>([
-    'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=800&auto=format&fit=crop&q=80',
-  ]);
+  const [images, setImages] = useState<string[]>([]);
 
-  // Form State — Step 2: Price & Quantity (Screen 7)
-  const [availableQuantity, setAvailableQuantity] = useState('150');
+  // Form State — Step 2: Price & Quantity (Starts clean)
+  const [availableQuantity, setAvailableQuantity] = useState('');
   const [unit, setUnit] = useState('kg');
-  const [pricePerUnit, setPricePerUnit] = useState('240');
-  const [minOrderQty, setMinOrderQty] = useState('10');
+  const [pricePerUnit, setPricePerUnit] = useState('');
+  const [minOrderQty, setMinOrderQty] = useState('1');
   const [showPriceGuidance, setShowPriceGuidance] = useState(true);
 
-  // Form State — Step 3: Harvest & Quality (Screen 8)
-  const [harvestDate, setHarvestDate] = useState('2026-10-06');
+  // Form State — Step 3: Harvest & Quality (Dynamic today's date)
+  const [harvestDate, setHarvestDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [shelfLife, setShelfLife] = useState('5 - 7 Days');
   const [qualityGrade, setQualityGrade] = useState<'Grade A' | 'Standard' | 'Export Grade'>('Grade A');
   const [packagingType, setPackagingType] = useState('Ventilated Wooden Crates');
   const [isOrganicCertified, setIsOrganicCertified] = useState(true);
 
-  // Form State — Step 4: Delivery & Location (Screen 9)
-  const [locationCity, setLocationCity] = useState('Katugastota');
+  // Form State — Step 4: Delivery & Location (Dynamically prefilled from Farmer profile)
+  const [locationCity, setLocationCity] = useState('');
   const [locationDistrict, setLocationDistrict] = useState('Kandy');
   const [pickupAvailable, setPickupAvailable] = useState(true);
   const [farmerDelivery, setFarmerDelivery] = useState(true);
   const [deliveryRadiusKm, setDeliveryRadiusKm] = useState(25);
   const [coldStorageAvailable, setColdStorageAvailable] = useState(false);
 
-  // Validation Error State (Screen 11)
+  // Load farmer's actual registered profile details on mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const user = await getStoredUser();
+        if (user && isMounted) {
+          const farmCity = user.farmDetails?.city || user.address || '';
+          if (farmCity) setLocationCity(farmCity);
+          if (user.district) setLocationDistrict(user.district);
+          if (user.farmDetails?.deliveryRadius) {
+            setDeliveryRadiusKm(user.farmDetails.deliveryRadius);
+          }
+          if (user.farmDetails?.pickupAvailable !== undefined) {
+            setPickupAvailable(user.farmDetails.pickupAvailable);
+          }
+          if (user.farmDetails?.directDeliveryAvailable !== undefined) {
+            setFarmerDelivery(user.farmDetails.directDeliveryAvailable);
+          }
+        }
+      } catch (e) {
+        console.warn('[AddProductWizard] Error reading user profile for prefill:', e);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Validation Error State
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showValidationBanner, setShowValidationBanner] = useState(false);
 
   const validateStep1 = () => {
     const errs: Record<string, string> = {};
-    if (!title.trim()) errs.title = 'Product title is required';
-    if (!category) errs.category = 'Please select a category';
-    if (images.length === 0) errs.images = 'Please upload at least 1 photo';
+    if (!title.trim()) {
+      errs.title = 'Product title is required';
+    } else if (title.trim().length < 3) {
+      errs.title = 'Product title must be at least 3 characters';
+    }
+
+    if (!category) {
+      errs.category = 'Please select a produce category';
+    }
+
+    if (!description.trim()) {
+      errs.description = 'Produce description is required';
+    } else if (description.trim().length < 10) {
+      errs.description = 'Description must be at least 10 characters';
+    }
+
+    if (images.length === 0) {
+      errs.images = 'Please upload or add at least 1 photo';
+    }
+
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
       setShowValidationBanner(true);
@@ -90,12 +134,62 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
 
   const validateStep2 = () => {
     const errs: Record<string, string> = {};
-    if (!availableQuantity || Number(availableQuantity) <= 0) {
-      errs.availableQuantity = 'Please enter valid available quantity';
+    const qty = parseFloat(availableQuantity);
+    if (!availableQuantity.trim() || isNaN(qty) || qty <= 0) {
+      errs.availableQuantity = 'Please enter a valid stock quantity greater than 0';
     }
-    if (!pricePerUnit || Number(pricePerUnit) <= 0) {
-      errs.pricePerUnit = 'Please enter price per unit';
+
+    const price = parseFloat(pricePerUnit);
+    if (!pricePerUnit.trim() || isNaN(price) || price <= 0) {
+      errs.pricePerUnit = 'Please enter a price greater than 0';
     }
+
+    const minQty = parseFloat(minOrderQty);
+    if (!minOrderQty.trim() || isNaN(minQty) || minQty <= 0) {
+      errs.minOrderQty = 'Minimum order quantity must be at least 1';
+    } else if (!isNaN(qty) && minQty > qty) {
+      errs.minOrderQty = `Minimum order (${minQty}) cannot exceed available stock (${qty})`;
+    }
+
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      setShowValidationBanner(true);
+      return false;
+    }
+    setShowValidationBanner(false);
+    return true;
+  };
+
+  const validateStep3 = () => {
+    const errs: Record<string, string> = {};
+    if (!harvestDate.trim()) {
+      errs.harvestDate = 'Harvest date is required';
+    }
+    if (!shelfLife.trim()) {
+      errs.shelfLife = 'Expected shelf life is required (e.g. 5-7 Days)';
+    }
+
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      setShowValidationBanner(true);
+      return false;
+    }
+    setShowValidationBanner(false);
+    return true;
+  };
+
+  const validateStep4 = () => {
+    const errs: Record<string, string> = {};
+    if (!locationCity.trim() || locationCity.trim().length < 2) {
+      errs.locationCity = 'Farm city or area is required (at least 2 letters)';
+    }
+    if (!locationDistrict.trim()) {
+      errs.locationDistrict = 'District is required';
+    }
+    if (!pickupAvailable && !farmerDelivery) {
+      errs.delivery = 'Please enable at least one option: Farm Gate Pickup or Direct Delivery';
+    }
+
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
       setShowValidationBanner(true);
@@ -111,13 +205,15 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
     } else if (currentStep === 2) {
       if (validateStep2()) setCurrentStep(3);
     } else if (currentStep === 3) {
-      setCurrentStep(4);
+      if (validateStep3()) setCurrentStep(4);
     } else if (currentStep === 4) {
-      setCurrentStep('preview');
+      if (validateStep4()) setCurrentStep('preview');
     }
   };
 
   const handleBack = () => {
+    setErrors({});
+    setShowValidationBanner(false);
     if (currentStep === 'preview') {
       setCurrentStep(4);
     } else if (currentStep === 4) {
@@ -132,21 +228,29 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
   };
 
   const handlePublish = async () => {
+    if (!validateStep1() || !validateStep2() || !validateStep3() || !validateStep4()) {
+      Alert.alert('Incomplete Form', 'Please review the fields in earlier steps before publishing.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const user = await getStoredUser();
+      // Normalize unit for backend API
+      const normalizedUnit = unit === 'unit' ? 'item' : unit === 'bunch' ? 'bundle' : unit;
+
       const payload = {
-        title: title.trim() || 'Organic Farm Produce',
+        title: title.trim(),
         category: category.toLowerCase(),
-        description: description.trim() || 'Direct from farm harvest, graded A quality.',
-        pricePerUnit: Number(pricePerUnit) || 240,
+        description: description.trim(),
+        pricePerUnit: parseFloat(pricePerUnit),
         currency: 'LKR',
-        unit: unit || 'kg',
-        availableQuantity: Number(availableQuantity) || 100,
-        minimumOrderQuantity: Number(minOrderQty) || 10,
-        locationCity: locationCity || 'Kandy',
-        locationDistrict: locationDistrict || user?.district || 'Kandy',
-        harvestDate: harvestDate || 'Fresh Today',
+        unit: normalizedUnit,
+        availableQuantity: parseFloat(availableQuantity),
+        minimumOrderQuantity: parseFloat(minOrderQty) || 1,
+        locationCity: locationCity.trim(),
+        locationDistrict: locationDistrict.trim() || user?.district || 'Kandy',
+        harvestDate: harvestDate.trim() || new Date().toISOString().split('T')[0],
         isOrganic: farmingMethod === '100% Organic',
         images: images.length > 0 ? images : ['https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=800'],
       };
@@ -154,9 +258,19 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
       await createProduceListing(payload);
       onSuccess(payload.title);
     } catch (err: any) {
-      console.log('[AddProductWizard] API publish error, continuing with optimistic success:', err);
-      // Fallback optimistic success so farmer flow works offline/demo seamlessly
-      onSuccess(title.trim() || 'Organic Farm Produce');
+      console.warn('[AddProductWizard] API publish error:', err);
+      const errorMsg = err?.message || 'Could not save to server.';
+      Alert.alert(
+        'Server Notice',
+        `${errorMsg}\n\nWould you like to save this listing locally for now?`,
+        [
+          { text: 'Try Again', style: 'cancel' },
+          {
+            text: 'Save Locally',
+            onPress: () => onSuccess(title.trim() || 'Produce Listing'),
+          },
+        ]
+      );
     } finally {
       setSubmitting(false);
     }
@@ -175,6 +289,17 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
         setErrors((prev) => ({ ...prev, images: '' }));
       },
     });
+  };
+
+  const handleUseSamplePhoto = () => {
+    const samplePhotos = [
+      'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?w=800&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1571680322279-a226e6a4cc2a?w=800&auto=format&fit=crop&q=80',
+    ];
+    const nextPhoto = samplePhotos[images.length % samplePhotos.length];
+    setImages((prev) => [...prev, nextPhoto]);
+    setErrors((prev) => ({ ...prev, images: '' }));
   };
 
   const removeImage = (index: number) => {
@@ -302,18 +427,24 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
 
             {/* Description */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Description</Text>
+              <Text style={styles.fieldLabel}>
+                Description <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
-                style={[styles.textInput, styles.textArea]}
-                placeholder="Describe your produce (harvest freshness, taste, sorting...)"
+                style={[styles.textInput, styles.textArea, !!errors.description && styles.inputError]}
+                placeholder="Describe your produce (harvest freshness, taste, minimum order, sorting... at least 10 chars)"
                 multiline
                 numberOfLines={4}
                 value={description}
-                onChangeText={setDescription}
+                onChangeText={(d) => {
+                  setDescription(d);
+                  setErrors((prev) => ({ ...prev, description: '' }));
+                }}
               />
+              {!!errors.description && <Text style={styles.errorText}>{errors.description}</Text>}
             </View>
 
-            {/* Product Images (Matching Screen 12) */}
+            {/* Product Images */}
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>
                 Product Photos ({images.length}/5) <Text style={styles.requiredStar}>*</Text>
@@ -336,6 +467,15 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
                   <Pressable style={styles.uploadBox} onPress={handleAddPhoto}>
                     <Text style={styles.uploadCameraEmoji}>📸</Text>
                     <Text style={styles.uploadText}>+ Add Photo</Text>
+                  </Pressable>
+                )}
+
+                {images.length === 0 && (
+                  <Pressable
+                    style={[styles.uploadBox, { backgroundColor: '#F0FDF4', borderColor: '#86EFAC' }]}
+                    onPress={handleUseSamplePhoto}>
+                    <Text style={styles.uploadCameraEmoji}>✨</Text>
+                    <Text style={[styles.uploadText, { color: '#166534' }]}>Sample Photo</Text>
                   </Pressable>
                 )}
               </View>
@@ -389,7 +529,7 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
                   }}
                 />
                 <View style={styles.unitPickerRow}>
-                  {UNITS.slice(0, 3).map((u) => (
+                  {UNITS.map((u) => (
                     <Pressable
                       key={u}
                       style={[styles.unitPill, unit === u && styles.unitPillActive]}
@@ -401,6 +541,7 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
                   ))}
                 </View>
               </View>
+              {!!errors.availableQuantity && <Text style={styles.errorText}>{errors.availableQuantity}</Text>}
             </View>
 
             {/* Base Price */}
@@ -418,18 +559,25 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
                   setErrors((prev) => ({ ...prev, pricePerUnit: '' }));
                 }}
               />
+              {!!errors.pricePerUnit && <Text style={styles.errorText}>{errors.pricePerUnit}</Text>}
             </View>
 
             {/* Minimum Order Quantity */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Minimum Order Quantity ({unit})</Text>
+              <Text style={styles.fieldLabel}>
+                Minimum Order Quantity ({unit}) <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
-                style={styles.textInput}
-                placeholder="e.g. 10"
+                style={[styles.textInput, !!errors.minOrderQty && styles.inputError]}
+                placeholder="e.g. 1"
                 keyboardType="numeric"
                 value={minOrderQty}
-                onChangeText={setMinOrderQty}
+                onChangeText={(m) => {
+                  setMinOrderQty(m);
+                  setErrors((prev) => ({ ...prev, minOrderQty: '' }));
+                }}
               />
+              {!!errors.minOrderQty && <Text style={styles.errorText}>{errors.minOrderQty}</Text>}
             </View>
 
             {/* Bulk Pricing Tier Discounts */}
@@ -438,13 +586,13 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
               <View style={styles.bulkTierRow}>
                 <Text style={styles.bulkTierLabel}>50 {unit}+</Text>
                 <Text style={styles.bulkTierPrice}>
-                  Rs. {Math.round((Number(pricePerUnit) || 240) * 0.95)} /{unit} (-5%)
+                  Rs. {Math.round((parseFloat(pricePerUnit) || 0) * 0.95)} /{unit} (-5%)
                 </Text>
               </View>
               <View style={styles.bulkTierRow}>
                 <Text style={styles.bulkTierLabel}>200 {unit}+</Text>
                 <Text style={styles.bulkTierPrice}>
-                  Rs. {Math.round((Number(pricePerUnit) || 240) * 0.9)} /{unit} (-10%)
+                  Rs. {Math.round((parseFloat(pricePerUnit) || 0) * 0.9)} /{unit} (-10%)
                 </Text>
               </View>
             </View>
@@ -479,23 +627,36 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
 
             {/* Harvest Date */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Harvest Date</Text>
+              <Text style={styles.fieldLabel}>
+                Harvest Date (YYYY-MM-DD) <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, !!errors.harvestDate && styles.inputError]}
                 placeholder="YYYY-MM-DD"
                 value={harvestDate}
-                onChangeText={setHarvestDate}
+                onChangeText={(h) => {
+                  setHarvestDate(h);
+                  setErrors((prev) => ({ ...prev, harvestDate: '' }));
+                }}
               />
+              {!!errors.harvestDate && <Text style={styles.errorText}>{errors.harvestDate}</Text>}
             </View>
 
             {/* Shelf Life */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Expected Shelf Life</Text>
+              <Text style={styles.fieldLabel}>
+                Expected Shelf Life <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, !!errors.shelfLife && styles.inputError]}
+                placeholder="e.g. 5 - 7 Days"
                 value={shelfLife}
-                onChangeText={setShelfLife}
+                onChangeText={(s) => {
+                  setShelfLife(s);
+                  setErrors((prev) => ({ ...prev, shelfLife: '' }));
+                }}
               />
+              {!!errors.shelfLife && <Text style={styles.errorText}>{errors.shelfLife}</Text>}
             </View>
 
             {/* Quality Grade */}
@@ -555,20 +716,34 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
 
             {/* Location Fields */}
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Farm Location</Text>
+              <Text style={styles.fieldLabel}>
+                Farm Location <Text style={styles.requiredStar}>*</Text>
+              </Text>
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TextInput
-                  style={[styles.textInput, { flex: 1 }]}
-                  placeholder="City"
-                  value={locationCity}
-                  onChangeText={setLocationCity}
-                />
-                <TextInput
-                  style={[styles.textInput, { flex: 1 }]}
-                  placeholder="District"
-                  value={locationDistrict}
-                  onChangeText={setLocationDistrict}
-                />
+                <View style={{ flex: 1 }}>
+                  <TextInput
+                    style={[styles.textInput, !!errors.locationCity && styles.inputError]}
+                    placeholder="City (e.g. Katugastota)"
+                    value={locationCity}
+                    onChangeText={(c) => {
+                      setLocationCity(c);
+                      setErrors((prev) => ({ ...prev, locationCity: '' }));
+                    }}
+                  />
+                  {!!errors.locationCity && <Text style={styles.errorText}>{errors.locationCity}</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <TextInput
+                    style={[styles.textInput, !!errors.locationDistrict && styles.inputError]}
+                    placeholder="District (e.g. Kandy)"
+                    value={locationDistrict}
+                    onChangeText={(d) => {
+                      setLocationDistrict(d);
+                      setErrors((prev) => ({ ...prev, locationDistrict: '' }));
+                    }}
+                  />
+                  {!!errors.locationDistrict && <Text style={styles.errorText}>{errors.locationDistrict}</Text>}
+                </View>
               </View>
             </View>
 
@@ -580,7 +755,10 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
               </View>
               <Switch
                 value={pickupAvailable}
-                onValueChange={setPickupAvailable}
+                onValueChange={(val) => {
+                  setPickupAvailable(val);
+                  setErrors((prev) => ({ ...prev, delivery: '' }));
+                }}
                 trackColor={{ false: '#CBD5E1', true: '#2E7D32' }}
               />
             </View>
@@ -593,10 +771,14 @@ export function AddProductWizard({ onBack, onSuccess }: AddProductWizardProps) {
               </View>
               <Switch
                 value={farmerDelivery}
-                onValueChange={setFarmerDelivery}
+                onValueChange={(val) => {
+                  setFarmerDelivery(val);
+                  setErrors((prev) => ({ ...prev, delivery: '' }));
+                }}
                 trackColor={{ false: '#CBD5E1', true: '#2E7D32' }}
               />
             </View>
+            {!!errors.delivery && <Text style={[styles.errorText, { marginBottom: 10 }]}>{errors.delivery}</Text>}
 
             {/* Delivery Radius Presets */}
             {farmerDelivery && (

@@ -25,11 +25,12 @@ export type ProduceCategory =
   | 'fruits'
   | 'grains'
   | 'spices'
+  | 'herbs'
   | 'organic'
   | 'tea'
   | 'other';
 
-export type ProduceUnit = 'kg' | 'g' | 'bundle' | 'crate' | 'item';
+export type ProduceUnit = 'kg' | 'g' | 'bundle' | 'crate' | 'item' | 'unit' | 'bunch';
 
 export interface ProduceListing {
   id: string;

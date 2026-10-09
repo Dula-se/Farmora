@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { stripe, STRIPE_PUBLISHABLE_KEY } from '../config/stripe.js';
+import { stripe, STRIPE_PUBLISHABLE_KEY, isStripeConfigured } from '../config/stripe.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { OrderModel } from '../models/Order.js';
 
@@ -10,7 +10,10 @@ export class PaymentController {
   static async getConfig(req: Request, res: Response) {
     return sendSuccess(
       res,
-      { publishableKey: STRIPE_PUBLISHABLE_KEY },
+      {
+        publishableKey: STRIPE_PUBLISHABLE_KEY,
+        isConfigured: isStripeConfigured,
+      },
       'Stripe configuration retrieved.'
     );
   }
@@ -20,6 +23,14 @@ export class PaymentController {
    */
   static async createPaymentIntent(req: Request, res: Response) {
     try {
+      if (!isStripeConfigured) {
+        return sendError(
+          res,
+          'Stripe payments are not configured. Please set STRIPE_SECRET_KEY in Vercel environment variables.',
+          503
+        );
+      }
+
       const { amount, currency = 'lkr', orderId, buyerId, paymentType = 'order', metadata } = req.body;
 
       if (!amount || amount <= 0) {

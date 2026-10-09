@@ -51,7 +51,7 @@ const produceSchema = new Schema<IProduceListing>(
     category: {
       type: String,
       required: true,
-      enum: ['vegetables', 'fruits', 'grains', 'spices', 'organic', 'tea', 'other'],
+      enum: ['vegetables', 'fruits', 'grains', 'spices', 'herbs', 'organic', 'tea', 'other'],
       index: true,
     },
     description: { type: String, required: true, trim: true },
@@ -60,7 +60,7 @@ const produceSchema = new Schema<IProduceListing>(
     unit: {
       type: String,
       required: true,
-      enum: ['kg', 'g', 'bundle', 'crate', 'item'],
+      enum: ['kg', 'g', 'bundle', 'crate', 'item', 'unit', 'bunch'],
     },
     availableQuantity: { type: Number, required: true, min: 0 },
     minimumOrderQuantity: { type: Number, required: true, min: 1 },
