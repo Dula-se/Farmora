@@ -25,6 +25,7 @@ import { MarketplaceFlow } from '@/screens/buyer/marketplace-flow';
 import { FarmerFlow } from '@/screens/farmer/farmer-flow';
 import { getStoredUser, ApiUser } from '@/services/api';
 import { CartProvider } from '@/context/cart-context';
+import { LanguageProvider } from '@/services/i18n';
 import AppTabs from '@/components/app-tabs';
 
 // App root layout with role-based routing (Farmer vs Buyer)
@@ -50,6 +51,7 @@ export default function TabLayout() {
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode | null>(null);
   const [accountType, setAccountType] = useState<'farmer' | 'buyer'>('farmer');
   const [resetIdentifier, setResetIdentifier] = useState('+94 77 XXX XXXX');
+  const [resetOtpCode, setResetOtpCode] = useState('');
 
   // ── Push Notifications ─────────────────────────────────────────────────────
   // Pass userId here once auth is implemented (e.g. useNotifications(user?.id))
@@ -194,17 +196,22 @@ export default function TabLayout() {
       case 'otp':
         return (
           <OtpVerificationScreen
-            phoneNumber={resetIdentifier.includes('@') ? '+94 77 123 4567' : resetIdentifier}
-            email={resetIdentifier.includes('@') ? resetIdentifier : 'farmer@famora.lk'}
+            phoneNumber={resetIdentifier.includes('@') ? '' : resetIdentifier}
+            email={resetIdentifier.includes('@') ? resetIdentifier : ''}
             onBack={() => setCurrentStep('forgot-password')}
             onChangeNumber={() => setCurrentStep('forgot-password')}
-            onVerify={() => setCurrentStep('reset-password')}
+            onVerify={(code) => {
+              setResetOtpCode(code);
+              setCurrentStep('reset-password');
+            }}
           />
         );
 
       case 'reset-password':
         return (
           <ResetPasswordScreen
+            identifier={resetIdentifier}
+            verifiedCode={resetOtpCode}
             onBack={() => setCurrentStep('otp')}
             onResetSuccess={() => setCurrentStep('login')}
           />
@@ -233,9 +240,11 @@ export default function TabLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <CartProvider>
-          {renderContent()}
-        </CartProvider>
+        <LanguageProvider>
+          <CartProvider>
+            {renderContent()}
+          </CartProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

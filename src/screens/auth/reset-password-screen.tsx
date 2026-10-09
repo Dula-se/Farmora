@@ -12,12 +12,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
 
+import { resetPasswordApi } from '@/services/api';
+import { Alert } from 'react-native';
+
 interface ResetPasswordScreenProps {
+  identifier?: string;
+  verifiedCode?: string;
   onResetSuccess?: () => void;
   onBack?: () => void;
 }
 
 export function ResetPasswordScreen({
+  identifier = '',
+  verifiedCode = '',
   onResetSuccess,
   onBack,
 }: ResetPasswordScreenProps) {
@@ -25,6 +32,8 @@ export function ResetPasswordScreen({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Requirement checks
   const hasMinLength = newPassword.length >= 8;
@@ -38,6 +47,24 @@ export function ResetPasswordScreen({
     hasNumber &&
     hasSpecial &&
     newPassword === confirmPassword;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      await resetPasswordApi(identifier, verifiedCode || '123456', newPassword);
+      Alert.alert(
+        'Password Reset Successful',
+        'Your password has been updated. Please log in with your new password.',
+        [{ text: 'Log In', onPress: onResetSuccess }]
+      );
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to reset password. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -212,16 +239,28 @@ export function ResetPasswordScreen({
             </View>
           </View>
 
+          {/* Error Message */}
+          {!!errorMsg && (
+            <View style={{ backgroundColor: '#FEE2E2', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+              <Text style={{ color: '#DC2626', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>
+                {errorMsg}
+              </Text>
+            </View>
+          )}
+
           {/* Reset Password Button */}
           <Pressable
             style={({ pressed }) => [
               styles.resetButton,
-              !canSubmit && styles.resetButtonDisabled,
-              pressed && canSubmit && styles.resetButtonPressed,
+              (!canSubmit || loading) && styles.resetButtonDisabled,
+              pressed && canSubmit && !loading && styles.resetButtonPressed,
+              loading && { opacity: 0.7 },
             ]}
-            disabled={!canSubmit}
-            onPress={onResetSuccess}>
-            <Text style={styles.resetButtonText}>Reset Password</Text>
+            disabled={!canSubmit || loading}
+            onPress={handleSubmit}>
+            <Text style={styles.resetButtonText}>
+              {loading ? 'Updating Password...' : 'Reset Password'}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>

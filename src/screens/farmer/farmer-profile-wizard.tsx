@@ -25,7 +25,7 @@ interface FarmerProfileWizardProps {
   onPreviewPublicProfile?: () => void;
 }
 
-const LANGUAGES = ['Sinhala', 'English', 'Tamil'];
+const LANGUAGES = ['English', 'Sinhala', 'Tamil'];
 const FARM_CATEGORIES = ['Vegetables', 'Fruits', 'Paddy/Grains', 'Spices', 'Tea', 'Herbs'];
 const FARM_TYPES = ['Organic', 'Conventional', 'Hydroponic', 'Greenhouse'];
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

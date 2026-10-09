@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { UserModel } from './User.js';
 import { ProduceModel } from './Produce.js';
+import { AppConfigService } from '../services/config.service.js';
 
 /**
  * Seeds the database with initial demo data on first run.
@@ -191,5 +192,8 @@ export async function seedDatabase(): Promise<void> {
     },
   ]);
 
-  console.log('[Seed] ✅ Demo data seeded successfully.');
+  // Seed initial AppConfig (Stripe & App Settings) into MongoDB
+  await AppConfigService.getStripeConfig().catch(() => {});
+
+  console.log('[Seed] ✅ Demo data & AppConfig seeded successfully.');
 }

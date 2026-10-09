@@ -49,6 +49,8 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [resetIdentifier, setResetIdentifier] = useState('+94 77 XXX XXXX');
+  const [resetOtpCode, setResetOtpCode] = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -374,20 +376,30 @@ export default function HomeScreen() {
           {activeModal === 'forgot' && (
             <ForgotPasswordScreen
               onBackToLogin={() => setActiveModal('login')}
-              onSendCode={() => setActiveModal('otp')}
+              onSendCode={(id) => {
+                if (id) setResetIdentifier(id);
+                setActiveModal('otp');
+              }}
             />
           )}
 
           {activeModal === 'otp' && (
             <OtpVerificationScreen
+              phoneNumber={resetIdentifier.includes('@') ? '' : resetIdentifier}
+              email={resetIdentifier.includes('@') ? resetIdentifier : ''}
               onBack={() => setActiveModal('forgot')}
               onChangeNumber={() => setActiveModal('forgot')}
-              onVerify={() => setActiveModal('reset')}
+              onVerify={(code) => {
+                setResetOtpCode(code);
+                setActiveModal('reset');
+              }}
             />
           )}
 
           {activeModal === 'reset' && (
             <ResetPasswordScreen
+              identifier={resetIdentifier}
+              verifiedCode={resetOtpCode}
               onBack={() => setActiveModal('otp')}
               onResetSuccess={() => setActiveModal('login')}
             />

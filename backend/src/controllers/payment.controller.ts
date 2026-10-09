@@ -1,36 +1,60 @@
 import { Request, Response } from 'express';
-import { stripe, STRIPE_PUBLISHABLE_KEY, isStripeConfigured } from '../config/stripe.js';
+import Stripe from 'stripe';
+import { AppConfigService } from '../services/config.service.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { OrderModel } from '../models/Order.js';
 
 export class PaymentController {
   /**
-   * Return the Stripe publishable key to clients
+   * Return the Stripe publishable key to clients from DB/env
    */
   static async getConfig(req: Request, res: Response) {
+    const config = await AppConfigService.getStripeConfig();
+    const isConfigured = Boolean(
+      config.secretKey && (config.secretKey.startsWith('sk_live_') || config.secretKey.startsWith('sk_test_'))
+    );
     return sendSuccess(
       res,
       {
-        publishableKey: STRIPE_PUBLISHABLE_KEY,
-        isConfigured: isStripeConfigured,
+        publishableKey: config.publishableKey || '',
+        isConfigured,
       },
-      'Stripe configuration retrieved.'
+      'Stripe configuration retrieved from database.'
     );
   }
 
   /**
-   * Create a Stripe PaymentIntent
+   * Save or update Stripe keys directly into the database
+   */
+  static async updateConfig(req: Request, res: Response) {
+    try {
+      const { secretKey, publishableKey } = req.body;
+      if (!secretKey && !publishableKey) {
+        return sendError(res, 'secretKey or publishableKey is required.', 400);
+      }
+      const updated = await AppConfigService.updateStripeConfig(secretKey || '', publishableKey || '');
+      return sendSuccess(res, { publishableKey: updated.publishableKey }, 'Payment configuration updated in database successfully.');
+    } catch (err: any) {
+      console.error('[PaymentController] updateConfig error:', err);
+      return sendError(res, 'Failed to update payment configuration.', 500);
+    }
+  }
+
+  /**
+   * Create a Stripe PaymentIntent using dynamic DB credentials
    */
   static async createPaymentIntent(req: Request, res: Response) {
     try {
-      if (!isStripeConfigured) {
+      const config = await AppConfigService.getStripeConfig();
+      if (!config.secretKey || (!config.secretKey.startsWith('sk_live_') && !config.secretKey.startsWith('sk_test_'))) {
         return sendError(
           res,
-          'Stripe payments are not configured. Please set STRIPE_SECRET_KEY in Vercel environment variables.',
+          'Stripe payments are not configured. Please set STRIPE_SECRET_KEY in database or environment variables.',
           503
         );
       }
 
+      const stripeClient = new Stripe(config.secretKey);
       const { amount, currency = 'lkr', orderId, buyerId, paymentType = 'order', metadata } = req.body;
 
       if (!amount || amount <= 0) {
@@ -38,10 +62,9 @@ export class PaymentController {
       }
 
       // Convert to integer cents (or zero-decimal currency)
-      // For Stripe, LKR is a two-decimal currency, so amount is in cents
       const amountInCents = Math.round(Number(amount) * 100);
 
-      const paymentIntent = await stripe.paymentIntents.create({
+      const paymentIntent = await stripeClient.paymentIntents.create({
         amount: amountInCents,
         currency: currency.toLowerCase(),
         automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
@@ -62,7 +85,7 @@ export class PaymentController {
           amount: paymentIntent.amount / 100,
           currency: paymentIntent.currency,
           status: paymentIntent.status,
-          publishableKey: STRIPE_PUBLISHABLE_KEY,
+          publishableKey: config.publishableKey,
         },
         'Stripe PaymentIntent created successfully.'
       );
@@ -83,7 +106,9 @@ export class PaymentController {
         return sendError(res, 'paymentIntentId is required.', 400);
       }
 
-      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const config = await AppConfigService.getStripeConfig();
+      const stripeClient = new Stripe(config.secretKey || 'sk_test_placeholder');
+      const intent = await stripeClient.paymentIntents.retrieve(paymentIntentId);
 
       const isSuccessful = intent.status === 'succeeded' || intent.status === 'requires_capture';
 
@@ -141,9 +166,11 @@ export class PaymentController {
       if (clean.startsWith('5')) pm = 'pm_card_mastercard';
       else if (clean.startsWith('3')) pm = 'pm_card_amex';
 
+      const config = await AppConfigService.getStripeConfig();
+      const stripeClient = new Stripe(config.secretKey || 'sk_test_placeholder');
       const amountInCents = Math.round(Number(amount) * 100);
 
-      const paymentIntent = await stripe.paymentIntents.create({
+      const paymentIntent = await stripeClient.paymentIntents.create({
         amount: amountInCents,
         currency: currency.toLowerCase(),
         payment_method: pm,

@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLanguage, SupportedLanguage } from '@/services/i18n';
 
 export type LanguageCode = 'sinhala' | 'english' | 'tamil';
 
@@ -46,9 +47,16 @@ const LANGUAGES: LanguageOption[] = [
 ];
 
 export function LanguageSelectionScreen({ onContinue }: LanguageSelectionScreenProps) {
-  const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>('sinhala');
+  const { setLanguage: setGlobalLanguage } = useLanguage();
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>('english');
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    const codeMap: Record<LanguageCode, SupportedLanguage> = {
+      english: 'en',
+      sinhala: 'si',
+      tamil: 'ta',
+    };
+    await setGlobalLanguage(codeMap[selectedLanguage]);
     if (onContinue) {
       onContinue(selectedLanguage);
     }

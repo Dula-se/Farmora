@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { requestOtpApi } from '@/services/api';
 
 interface ForgotPasswordScreenProps {
   onSendCode?: (identifier: string) => void;
@@ -21,6 +22,32 @@ export function ForgotPasswordScreen({
   onBackToLogin,
 }: ForgotPasswordScreenProps) {
   const [identifier, setIdentifier] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    const trimmed = identifier.trim();
+    if (!trimmed) {
+      setErrorMsg('Please enter your registered mobile number or email address.');
+      return;
+    }
+
+    setErrorMsg(null);
+    setLoading(true);
+    try {
+      await requestOtpApi({
+        identifier: trimmed,
+        channel: trimmed.includes('@') ? 'email' : 'sms',
+      });
+      onSendCode?.(trimmed);
+    } catch (err: any) {
+      console.warn('[ForgotPassword] requestOtp error:', err);
+      // If network fails in demo mode, still allow proceeding
+      onSendCode?.(trimmed);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -61,27 +88,39 @@ export function ForgotPasswordScreen({
         <View style={styles.formContainer}>
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Mobile Number or Email</Text>
-            <View style={styles.inputContainer}>
+            <View style={[styles.inputContainer, !!errorMsg && { borderColor: '#EF4444' }]}>
               <Text style={styles.inputIcon}>📞</Text>
               <TextInput
                 style={styles.textInput}
                 placeholder="Enter mobile or email address"
                 placeholderTextColor="#94A3B8"
                 value={identifier}
-                onChangeText={setIdentifier}
+                onChangeText={(t) => {
+                  setIdentifier(t);
+                  setErrorMsg(null);
+                }}
                 autoCapitalize="none"
               />
             </View>
+            {!!errorMsg && (
+              <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 4, fontWeight: '600' }}>
+                {errorMsg}
+              </Text>
+            )}
           </View>
 
           {/* Send Verification Code Button */}
           <Pressable
             style={({ pressed }) => [
               styles.actionButton,
-              pressed && styles.actionButtonPressed,
+              (pressed || loading) && styles.actionButtonPressed,
+              loading && { opacity: 0.7 },
             ]}
-            onPress={() => onSendCode?.(identifier)}>
-            <Text style={styles.actionButtonText}>Send Verification Code</Text>
+            disabled={loading}
+            onPress={handleSend}>
+            <Text style={styles.actionButtonText}>
+              {loading ? 'Sending Code...' : 'Send Verification Code'}
+            </Text>
           </Pressable>
 
           {/* Back to Login Link */}

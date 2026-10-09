@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { clearAuthSession } from '@/services/api';
+import { useLanguage } from '@/services/i18n';
 
 interface SettingsScreenProps {
   onBack?: () => void;
@@ -26,9 +27,16 @@ export function SettingsScreen({
   onOpenSecurity,
   onLogout,
 }: SettingsScreenProps) {
+  const { language, setLanguage, t } = useLanguage();
   const [pushEnabled, setPushEnabled] = useState(true);
   const [orderUpdates, setOrderUpdates] = useState(true);
-  const [selectedLanguage, setSelectedLanguage] = useState('English');
+
+  const currentLanguageLabel =
+    language === 'si'
+      ? 'සිංහල (Sinhala)'
+      : language === 'ta'
+      ? 'தமிழ் (Tamil)'
+      : 'English';
 
   const handleLogout = () => {
     Alert.alert('Confirm Logout', 'Are you sure you want to sign out?', [
@@ -46,9 +54,9 @@ export function SettingsScreen({
 
   const handleLanguagePicker = () => {
     Alert.alert('Select Language', 'Choose your preferred display language', [
-      { text: 'English', onPress: () => setSelectedLanguage('English') },
-      { text: 'සිංහල (Sinhala)', onPress: () => setSelectedLanguage('Sinhala') },
-      { text: 'தமிழ் (Tamil)', onPress: () => setSelectedLanguage('Tamil') },
+      { text: 'English', onPress: () => setLanguage('en') },
+      { text: 'සිංහල (Sinhala)', onPress: () => setLanguage('si') },
+      { text: 'தமிழ் (Tamil)', onPress: () => setLanguage('ta') },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -78,7 +86,7 @@ export function SettingsScreen({
           <Pressable style={styles.menuItem} onPress={handleLanguagePicker}>
             <Text style={styles.menuLabel}>Language</Text>
             <View style={styles.menuRight}>
-              <Text style={styles.settingValue}>{selectedLanguage}</Text>
+              <Text style={styles.settingValue}>{currentLanguageLabel}</Text>
               <Text style={styles.chevron}>›</Text>
             </View>
           </Pressable>

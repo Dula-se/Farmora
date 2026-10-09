@@ -29,7 +29,8 @@ export function OtpVerificationScreen({
   onBack,
   onChangeNumber,
 }: OtpVerificationScreenProps) {
-  const [channel, setChannel] = useState<'email' | 'sms'>('email');
+  const isEmailTarget = Boolean(email && email.includes('@') && email !== 'farmer@famora.lk');
+  const [channel, setChannel] = useState<'email' | 'sms'>(isEmailTarget ? 'email' : 'sms');
   const [googleEmailInput, setGoogleEmailInput] = useState(email);
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [timerSeconds, setTimerSeconds] = useState(60);
