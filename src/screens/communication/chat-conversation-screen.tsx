@@ -872,7 +872,7 @@ export function ChatConversationScreen({
     // 1. Send the invitation in the conversation screen to the client to login/join
     const callInvitation: FirestoreCallInvitation = {
       callId: `call_${Date.now()}`,
-      meetingUrl: instant.googleMeetUrl,
+      meetingUrl: instant.meetingUrl,
       hostName: currentUser.fullName || 'You',
       hostAvatar: currentUser.avatarUrl,
       mode: 'video',
@@ -892,11 +892,11 @@ export function ChatConversationScreen({
       console.warn('[Chat] Failed to send video call invitation:', err);
     }
 
-    // 2. Suddenly navigates to google video!
+    // 2. Suddenly navigates to the video meeting room!
     try {
-      await Linking.openURL(instant.googleMeetUrl);
+      await Linking.openURL(instant.meetingUrl);
     } catch {
-      Alert.alert('Google Video Call', `Call link: ${instant.googleMeetUrl}`);
+      Alert.alert('Video Call', `Call link: ${instant.meetingUrl}`);
     }
 
     // 3. Keep parent flow synced
@@ -1367,7 +1367,8 @@ export function ChatConversationScreen({
             <Text style={styles.sheetTitle}>Share & Negotiate</Text>
 
             {[
-              { icon: '📹', title: 'Start Instant Video Call (Google Video)', sub: 'Launch Google Meet & send invite to client', action: () => { setShowActionSheet(false); handleInitiateVideoCall(); } },
+              { icon: '📹', title: 'Start Instant Video Call', sub: 'Launch live HD room & send invitation to client', action: () => { setShowActionSheet(false); handleInitiateVideoCall(); } },
+              { icon: '🌐', title: 'Open Google Meet', sub: 'Create new meeting on meet.google.com', action: () => { setShowActionSheet(false); Linking.openURL('https://meet.google.com/new'); } },
               { icon: '📅', title: 'Schedule Video Call (Cal.com)', sub: 'Book live farm inspection via Cal.com scheduler', action: () => { setShowActionSheet(false); onRequestInspection ? onRequestInspection() : setShowLocalScheduleModal(true); } },
               { icon: '💰', title: 'Make Price Offer', sub: 'Negotiate direct bulk farm gate price', action: () => { setShowActionSheet(false); setShowOfferModal(true); } },
               { icon: '🎙️', title: 'Attach Audio / Voice Note', sub: 'Send audio note file from device', action: () => { setShowActionSheet(false); handlePickAndSendAudio(); } },

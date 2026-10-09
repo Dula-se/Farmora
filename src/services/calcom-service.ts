@@ -181,29 +181,31 @@ export class CalComService {
   }
 
   /**
-   * Generates a Google Video / Meet link for instant calls.
-   * Google Meet instant meeting URL: https://meet.google.com/new
-   * Or room code: https://meet.google.com/${code}
+   * Generates a working live video room link for instant calls.
+   * Uses an open HD WebRTC room that allows both caller and client to connect immediately
+   * without requiring Google account login or returning 'no video call like that' errors.
    */
-  static generateInstantMeetingUrl(prefix: string = 'famora'): {
+  static generateInstantMeetingUrl(prefix: string = 'FamoraInspection'): {
     meetingUrl: string;
+    liveVideoUrl: string;
     googleMeetUrl: string;
-    calVideoUrl: string;
     roomCode: string;
   } {
-    const chars = 'abcdefghijklmnopqrstuvwxyz';
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     const randPart = (len: number) =>
       Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
     
-    // Google Meet style 3-4-3 code: e.g. abc-defg-hij
-    const roomCode = `${randPart(3)}-${randPart(4)}-${randPart(3)}`;
-    const googleMeetUrl = `https://meet.google.com/${roomCode}`;
-    const calVideoUrl = `https://app.cal.com/video/${prefix}-${roomCode}`;
+    // Unique room code
+    const roomCode = `${randPart(4)}-${randPart(4)}`;
+    // Guaranteed live WebRTC video room accessible from any device / browser without login errors
+    const liveVideoUrl = `https://meet.jit.si/${prefix}-${roomCode}`;
+    // Official Google Meet instant creation endpoint (if user prefers Google Meet)
+    const googleMeetUrl = `https://meet.google.com/new`;
 
     return {
-      meetingUrl: googleMeetUrl,
+      meetingUrl: liveVideoUrl,
+      liveVideoUrl,
       googleMeetUrl,
-      calVideoUrl,
       roomCode,
     };
   }
