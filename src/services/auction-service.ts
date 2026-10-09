@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch, getStoredUser } from './api';
+import { sendLocalNotification } from './notifications';
 
 export interface BidRecord {
   bidderId: string;
@@ -281,6 +282,11 @@ export const AuctionService = {
         const idx = auctionsCache.findIndex((a) => a.id === auctionId || a._id === auctionId);
         if (idx !== -1) auctionsCache[idx] = updated;
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(auctionsCache)).catch(() => {});
+        sendLocalNotification(
+          '🔨 Bid Placed Successfully',
+          `Your bid of Rs. ${bidAmountPerKg}/kg on ${updated.cropName} was placed!`,
+          { auctionId, bidAmountPerKg }
+        ).catch(() => {});
         return updated;
       }
     } catch (e: any) {

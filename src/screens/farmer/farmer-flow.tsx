@@ -244,6 +244,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             onViewProducts={() => handleTabPress('products')}
             onViewOrders={() => handleTabPress('orders')}
             onViewMessages={() => handleTabPress('messages')}
+            onOpenNotifications={() => setCurrentView('notifications')}
             onOpenProfile={() => handleTabPress('profile')}
             onOpenMarketTrends={() => setCurrentView('market-trends')}
             onOpenDistrictPriceCompare={() => setCurrentView('district-price-compare')}
@@ -408,7 +409,9 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             onActionPress={(item) => {
               if (item.type === 'message') setCurrentView('messages');
               else if (item.type === 'price') setCurrentView('price-alerts');
-              else Alert.alert('Notification', item.description);
+              else if (item.type === 'order') setCurrentView('orders');
+              else if (item.type === 'bid') setCurrentView('auctions-hub');
+              else Alert.alert(item.title, item.description);
             }}
           />
         )}

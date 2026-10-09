@@ -5,6 +5,7 @@ import { StyleSheet, View, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type * as Notifications from 'expo-notifications';
 import { useNotifications } from '@/hooks/use-notifications';
+import { sendLocalNotification } from '@/services/notifications';
 
 import { FarmoraSplashScreen } from '@/components/splash-screen';
 import { LanguageSelectionScreen, LanguageCode } from '@/screens/language-selection-screen';
@@ -133,6 +134,10 @@ export default function TabLayout() {
                 setAccountType(user.accountType === 'farmer' ? 'farmer' : 'buyer');
               }
               setCurrentStep('authenticated');
+              sendLocalNotification(
+                '🔐 Security Alert: Login Detected',
+                `Someone logged into your Farmora account (${user?.fullName || 'User'}). If this was you, you can safely continue.`
+              ).catch(() => {});
             }}
             onCreateAccount={() => setCurrentStep('account-type')}
             onForgotPassword={() => setCurrentStep('forgot-password')}

@@ -290,6 +290,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenCategories={() => setCurrentView('categories')}
             onSelectCategory={handleSelectCategory}
             onSelectProduct={handleSelectProduct}
+            onOpenNotifications={() => setCurrentView('notifications')}
             onOpenFarmsMap={() => setCurrentView('farm-map')}
             onOpenFarmerMatching={() => setCurrentView('farmer-matching')}
             onOpenProductScanner={() => setCurrentView('product-scanner')}
@@ -574,7 +575,9 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onActionPress={(item) => {
               if (item.type === 'message') setCurrentView('messages');
               else if (item.type === 'price') setCurrentView('price-alerts');
-              else Alert.alert('Notification', item.description);
+              else if (item.type === 'bid') setCurrentView('auctions-hub');
+              else if (item.type === 'order') setCurrentView('buyer-orders');
+              else Alert.alert(item.title, item.description);
             }}
           />
         )}

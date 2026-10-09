@@ -551,3 +551,53 @@ export async function uploadImage(
   return result.data;
 }
 
+// ─── Real Notifications API ──────────────────────────────────────────────────
+export interface ApiNotificationItem {
+  id: string;
+  userId: string;
+  type: 'order' | 'bid' | 'price' | 'message' | 'system';
+  title: string;
+  description: string;
+  timestamp: string;
+  createdAt: string;
+  isRead: boolean;
+  actionLabel?: string;
+  actionRoute?: string;
+  data?: Record<string, any>;
+}
+
+export async function fetchNotifications(userId: string): Promise<ApiNotificationItem[]> {
+  try {
+    const result = await apiFetch<ApiNotificationItem[]>(`/notifications?userId=${encodeURIComponent(userId)}`);
+    return result.data || [];
+  } catch (err) {
+    console.warn('[Notifications] fetchNotifications error:', err);
+    return [];
+  }
+}
+
+export async function fetchUnreadNotificationsCount(userId: string): Promise<number> {
+  try {
+    const result = await apiFetch<{ count: number }>(`/notifications/unread-count?userId=${encodeURIComponent(userId)}`);
+    return result.data?.count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function markNotificationAsRead(id: string): Promise<void> {
+  try {
+    await apiFetch(`/notifications/${id}/read`, { method: 'PATCH' });
+  } catch {}
+}
+
+export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+  try {
+    await apiFetch('/notifications/mark-all-read', {
+      method: 'PATCH',
+      body: JSON.stringify({ userId }),
+    });
+  } catch {}
+}
+
+

@@ -7,6 +7,7 @@ import { ProduceModel } from '../models/Produce.js';
 import { OtpModel } from '../models/Otp.js';
 import mongoose from 'mongoose';
 import { config } from '../config/env.js';
+import { NotificationController } from './notification.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import type { AccountType } from '../types/index.js';
 
@@ -183,6 +184,23 @@ export class AuthController {
 
       const token = generateToken(user._id.toString(), user.accountType);
 
+      // ── Notification: Send login security alert ────────────────────────────
+      const nowFormatted = new Date().toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      NotificationController.createNotification({
+        userId: user._id.toString(),
+        title: '🔐 Security Alert: New Login Detected',
+        description: `Someone logged into your Farmora account on ${nowFormatted}. If this was you, you can safely ignore this alert. If not, secure your password immediately.`,
+        type: 'system',
+        data: { loginTime: new Date().toISOString() },
+        actionLabel: 'Security Settings',
+        actionRoute: 'security',
+      }).catch(() => {});
+
       return sendSuccess(
         res,
         {
@@ -237,6 +255,23 @@ export class AuthController {
       }
 
       const token = generateToken(user._id.toString(), user.accountType);
+
+      // ── Notification: Send Google login security alert ─────────────────────
+      const nowFormatted = new Date().toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      NotificationController.createNotification({
+        userId: user._id.toString(),
+        title: '🔐 Security Alert: Google Sign-in Detected',
+        description: `Your account was accessed via Google Sign-In on ${nowFormatted}. If this was you, you can safely ignore this alert.`,
+        type: 'system',
+        data: { loginTime: new Date().toISOString(), method: 'google' },
+        actionLabel: 'Security Settings',
+        actionRoute: 'security',
+      }).catch(() => {});
 
       return sendSuccess(
         res,

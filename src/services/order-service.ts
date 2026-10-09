@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch, getStoredUser } from './api';
+import { sendLocalNotification } from './notifications';
 
 export interface OrderItem {
   id?: string;
@@ -365,6 +366,10 @@ export const OrderService = {
         const updated = [created, ...currentList.filter(o => o.orderNumber !== created.orderNumber)];
         ordersCache = updated;
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+        sendLocalNotification(
+          '📦 Order Confirmed ' + created.orderNumber,
+          `Your order for ${orderData.items?.[0]?.produceTitle || 'produce'} has been placed and sent to ${orderData.farmerName || 'the farmer'}!`
+        ).catch(() => {});
         return created;
       }
     } catch (e) {

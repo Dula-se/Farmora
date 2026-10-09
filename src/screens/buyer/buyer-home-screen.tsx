@@ -20,6 +20,7 @@ import {
   ApiUser,
   fetchWishlist,
   toggleWishlist,
+  fetchUnreadNotificationsCount,
 } from '@/services/api';
 import { WishlistService } from '@/services/wishlist-service';
 import { useCart } from '@/context/cart-context';
@@ -33,6 +34,7 @@ interface BuyerHomeScreenProps {
   onOpenCategories: () => void;
   onSelectCategory: (categoryId: string, categoryName: string) => void;
   onSelectProduct: (product: ApiProduceItem) => void;
+  onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
   onOpenOrders?: () => void;
   onOpenChats?: () => void;
@@ -68,6 +70,7 @@ export function BuyerHomeScreen({
   onOpenCategories,
   onSelectCategory,
   onSelectProduct,
+  onOpenNotifications,
   onOpenProfile,
   onOpenOrders,
   onOpenChats,
@@ -88,6 +91,7 @@ export function BuyerHomeScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState<ApiUser | null>(null);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState('Colombo, Sri Lanka');
@@ -102,6 +106,12 @@ export function BuyerHomeScreen({
       ]);
       setProduceList(items);
       setUser(currentUser);
+      const uid = currentUser?.id || (currentUser as any)?._id;
+      if (uid) {
+        fetchUnreadNotificationsCount(uid)
+          .then(setUnreadNotificationsCount)
+          .catch(() => {});
+      }
       if (currentUser?.district) {
         setSelectedLocation(`${currentUser.district}, Sri Lanka`);
       }
@@ -323,12 +333,21 @@ export function BuyerHomeScreen({
             </Pressable>
 
             {/* Notification Bell */}
-            <Pressable style={styles.headerActionBtn} hitSlop={10}>
+            <Pressable
+              style={styles.headerActionBtn}
+              hitSlop={10}
+              onPress={onOpenNotifications}>
               <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                 <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </Svg>
-              <View style={styles.unreadDot} />
+              {unreadNotificationsCount > 0 && (
+                <View style={styles.badgeRed}>
+                  <Text style={styles.badgeText}>
+                    {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
         </View>

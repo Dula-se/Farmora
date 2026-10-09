@@ -13,13 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import { getStoredUser, ApiUser, fetchMyListings, ApiProduceItem } from '@/services/api';
+import { getStoredUser, ApiUser, fetchMyListings, ApiProduceItem, fetchUnreadNotificationsCount } from '@/services/api';
 
 interface FarmerDashboardScreenProps {
   onAddProduct: () => void;
   onViewProducts: () => void;
   onViewOrders: () => void;
   onViewMessages?: () => void;
+  onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
   onOpenMarketTrends?: () => void;
   onOpenDistrictPriceCompare?: () => void;
@@ -72,6 +73,7 @@ export function FarmerDashboardScreen({
   onViewProducts,
   onViewOrders,
   onViewMessages,
+  onOpenNotifications,
   onOpenProfile,
   onOpenMarketTrends,
   onOpenDistrictPriceCompare,
@@ -86,6 +88,7 @@ export function FarmerDashboardScreen({
 }: FarmerDashboardScreenProps) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [myListings, setMyListings] = useState<ApiProduceItem[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isNewFarmerMode, setIsNewFarmerMode] = useState(false);
@@ -98,6 +101,12 @@ export function FarmerDashboardScreen({
       ]);
       setUser(currentUser);
       setMyListings(listings);
+      const uid = currentUser?.id || (currentUser as any)?._id;
+      if (uid) {
+        fetchUnreadNotificationsCount(uid)
+          .then(setUnreadNotificationsCount)
+          .catch(() => {});
+      }
       if (listings.length === 0) {
         setIsNewFarmerMode(false); // default to full dashboard with sample stats, toggleable
       }
@@ -136,11 +145,20 @@ export function FarmerDashboardScreen({
 
         <View style={styles.headerRight}>
           <Pressable
-            style={styles.modeToggleBtn}
-            onPress={() => setIsNewFarmerMode(!isNewFarmerMode)}>
-            <Text style={styles.modeToggleText}>
-              {isNewFarmerMode ? 'Active View' : 'New Farmer View'}
-            </Text>
+            style={styles.notificationBtn}
+            hitSlop={8}
+            onPress={onOpenNotifications}>
+            <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke="#1E293B" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </Svg>
+            {unreadNotificationsCount > 0 && (
+              <View style={styles.badgeRed}>
+                <Text style={styles.badgeText}>
+                  {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                </Text>
+              </View>
+            )}
           </Pressable>
 
           <Pressable
@@ -650,6 +668,36 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     overflow: 'hidden',
+  },
+  notificationBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  badgeRed: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#EF4444',
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   avatarFallback: {
     width: '100%',

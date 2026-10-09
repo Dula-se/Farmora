@@ -11,6 +11,7 @@ import paymentRoutes from './payment.routes.js';
 import orderRoutes from './order.routes.js';
 import harvestRoutes from './harvest.routes.js';
 import auctionRoutes from './auction.routes.js';
+import notificationRoutes from './notification.routes.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/payments', paymentRoutes);
 router.use('/orders', orderRoutes);
 router.use('/harvests', harvestRoutes);
 router.use('/auctions', auctionRoutes);
+router.use('/notifications', notificationRoutes);
 
 export default router;

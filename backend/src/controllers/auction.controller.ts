@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AuctionModel } from '../models/Auction.js';
+import { NotificationController } from './notification.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
 export class AuctionController {
@@ -195,6 +196,30 @@ export class AuctionController {
       }
 
       await auction.save();
+
+      // ── Notification: Notify all buyers + auction farmer ───────────────────
+      // 1. Notify the farmer who listed the auction
+      if (auction.farmerId) {
+        NotificationController.createNotification({
+          userId: auction.farmerId,
+          title: `📈 New Bid on your auction: ${auction.cropName}`,
+          description: `${bidderName || 'A buyer'} placed a bid of Rs. ${bid}/kg on your ${auction.lotSizeKg} ${auction.unit} lot (Total: Rs. ${totalLotAmount.toLocaleString()}).`,
+          type: 'bid',
+          data: { auctionId: auction._id.toString(), bidAmount: bid, cropName: auction.cropName },
+          actionLabel: 'View Auction',
+          actionRoute: 'auction',
+        }).catch(() => {});
+      }
+
+      // 2. Notify all registered buyers about the new leading bid
+      NotificationController.notifyAllBuyers({
+        title: `🔨 New Bid: Rs. ${bid}/kg on ${auction.cropName}`,
+        description: `${bidderName || 'A buyer'} placed a new leading bid on ${auction.cropName} (${auction.variety || 'Lot'}). Current: Rs. ${bid}/kg. Place your counter-bid now!`,
+        excludeUserId: bidderId,
+        data: { auctionId: auction._id.toString(), bidAmount: bid, cropName: auction.cropName },
+        actionLabel: 'Bid Now',
+        actionRoute: 'auction',
+      }).catch(() => {});
 
       return sendSuccess(
         res,

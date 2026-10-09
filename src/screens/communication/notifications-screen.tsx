@@ -1,69 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FlatList,
   Pressable,
+  RefreshControl,
   StatusBar,
   StyleSheet,
   Text,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import {
+  getStoredUser,
+  fetchNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  ApiNotificationItem,
+} from '@/services/api';
 
-interface NotificationItem {
+export interface NotificationItem {
   id: string;
-  type: 'order' | 'price' | 'message' | 'system';
+  type: 'order' | 'bid' | 'price' | 'message' | 'system';
   title: string;
   description: string;
   timestamp: string;
   isRead: boolean;
   actionLabel?: string;
   actionRoute?: string;
+  data?: Record<string, any>;
 }
 
-const DEMO_NOTIFICATIONS: NotificationItem[] = [
+const FALLBACK_NOTIFICATIONS: NotificationItem[] = [
   {
-    id: 'n1',
+    id: 'f1',
     type: 'order',
-    title: 'Order Dispatched #1042',
+    title: 'Order Placed #1042',
     description: 'Farmer Kusuma Bandara dispatched 50kg Organic Tomatoes via Welimada cold truck.',
     timestamp: '15m ago',
     isRead: false,
     actionLabel: 'Track Delivery',
   },
   {
-    id: 'n2',
-    type: 'message',
-    title: 'New Price Counter-Offer',
-    description: 'Green Leaf Supermarket proposed Rs. 210/kg for your 100kg highland carrots.',
-    timestamp: '42m ago',
+    id: 'f2',
+    type: 'bid',
+    title: 'New Bid on Auction',
+    description: 'A buyer placed a leading bid of Rs. 260/kg for Highland Carrots.',
+    timestamp: '35m ago',
     isRead: false,
-    actionLabel: 'View Offer',
+    actionLabel: 'View Auction',
   },
   {
-    id: 'n3',
-    type: 'price',
-    title: 'Price Drop Alert 📉',
-    description: 'Manning Market wholesale rate for Red Tomatoes dropped to Rs. 220/kg (-12%).',
-    timestamp: '2h ago',
-    isRead: true,
-    actionLabel: 'View Trends',
-  },
-  {
-    id: 'n4',
-    type: 'order',
-    title: 'Escrow Payment Released',
-    description: 'Payment of Rs. 24,000 for Order #1041 cleared into your verified commercial account.',
-    timestamp: '1d ago',
-    isRead: true,
-    actionLabel: 'View Receipt',
-  },
-  {
-    id: 'n5',
+    id: 'f3',
     type: 'system',
-    title: 'SL-GAP Certification Renewed',
-    description: 'Your Department of Agriculture organic badge is valid until April 2027.',
-    timestamp: '3d ago',
+    title: '🔐 Security Alert: Login Detected',
+    description: 'New login session verified on this device.',
+    timestamp: '1h ago',
     isRead: true,
   },
 ];
@@ -79,27 +71,81 @@ export function NotificationsScreen({
   onOpenPreferences,
   onActionPress,
 }: NotificationsScreenProps) {
-  const [filterTab, setFilterTab] = useState<'all' | 'order' | 'price' | 'message'>('all');
-  const [notifications, setNotifications] = useState<NotificationItem[]>(DEMO_NOTIFICATIONS);
+  const [filterTab, setFilterTab] = useState<'all' | 'order' | 'bid' | 'price' | 'message'>('all');
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  const loadNotifications = async () => {
+    try {
+      const user = await getStoredUser();
+      const myId = user?.id || user?._id || '';
+      setCurrentUserId(myId);
+
+      if (myId) {
+        const liveNotifs = await fetchNotifications(myId);
+        if (liveNotifs && liveNotifs.length > 0) {
+          setNotifications(liveNotifs);
+          setLoading(false);
+          return;
+        }
+      }
+      setNotifications(FALLBACK_NOTIFICATIONS);
+    } catch {
+      setNotifications(FALLBACK_NOTIFICATIONS);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadNotifications();
+  };
 
   const filtered = notifications.filter((n) => {
     if (filterTab === 'all') return true;
     return n.type === filterTab;
   });
 
-  const markAllRead = () => {
+  const markAllRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    if (currentUserId) {
+      await markAllNotificationsAsRead(currentUserId);
+    }
+  };
+
+  const handleItemPress = async (item: NotificationItem) => {
+    if (!item.isRead) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n))
+      );
+      if (!item.id.startsWith('f')) {
+        markNotificationAsRead(item.id);
+      }
+    }
+    onActionPress?.(item);
   };
 
   const getIcon = (type: NotificationItem['type']) => {
     switch (type) {
       case 'order':
         return '📦';
+      case 'bid':
+        return '🔨';
       case 'price':
         return '📊';
       case 'message':
         return '💬';
       case 'system':
+        return '🔐';
+      default:
         return '🌱';
     }
   };
@@ -123,7 +169,7 @@ export function NotificationsScreen({
 
       {/* Top Filter Tabs */}
       <View style={styles.tabsRow}>
-        {(['all', 'order', 'price', 'message'] as const).map((tab) => (
+        {(['all', 'order', 'bid', 'price', 'message'] as const).map((tab) => (
           <Pressable
             key={tab}
             style={[styles.tabBtn, filterTab === tab && styles.tabBtnActive]}
@@ -131,7 +177,8 @@ export function NotificationsScreen({
             <Text style={[styles.tabText, filterTab === tab && styles.tabTextActive]}>
               {tab === 'all' && 'All'}
               {tab === 'order' && 'Orders'}
-              {tab === 'price' && 'Price Alerts'}
+              {tab === 'bid' && 'Bids 🔨'}
+              {tab === 'price' && 'Prices'}
               {tab === 'message' && 'Chats'}
             </Text>
           </Pressable>
@@ -141,7 +188,7 @@ export function NotificationsScreen({
       {/* Mark All Read button */}
       <View style={styles.markReadRow}>
         <Text style={styles.unreadCountText}>
-          {notifications.filter((n) => !n.isRead).length} new updates
+          {notifications.filter((n) => !n.isRead).length} unread updates
         </Text>
         <Pressable onPress={markAllRead}>
           <Text style={styles.markReadBtnText}>Mark all as read</Text>
@@ -149,35 +196,45 @@ export function NotificationsScreen({
       </View>
 
       {/* List */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <Pressable
-            style={[styles.notifCard, !item.isRead && styles.notifCardUnread]}
-            onPress={() => onActionPress?.(item)}>
-            <View style={styles.iconCircle}>
-              <Text style={{ fontSize: 20 }}>{getIcon(item.type)}</Text>
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={styles.notifHeaderRow}>
-                <Text style={[styles.notifTitle, !item.isRead && styles.notifTitleUnread]}>
-                  {item.title}
-                </Text>
-                <Text style={styles.timestampText}>{item.timestamp}</Text>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#1E5E3A" />
+          <Text style={{ color: '#64748B', fontSize: 13, marginTop: 10 }}>Loading notifications...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1E5E3A" />
+          }
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item }) => (
+            <Pressable
+              style={[styles.notifCard, !item.isRead && styles.notifCardUnread]}
+              onPress={() => handleItemPress(item)}>
+              <View style={styles.iconCircle}>
+                <Text style={{ fontSize: 20 }}>{getIcon(item.type)}</Text>
               </View>
-              <Text style={styles.descText}>{item.description}</Text>
-
-              {item.actionLabel && (
-                <View style={styles.actionRow}>
-                  <Text style={styles.actionBtnText}>{item.actionLabel} →</Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <View style={styles.notifHeaderRow}>
+                  <Text style={[styles.notifTitle, !item.isRead && styles.notifTitleUnread]}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.timestampText}>{item.timestamp}</Text>
                 </View>
-              )}
-            </View>
-          </Pressable>
-        )}
-      />
+                <Text style={styles.descText}>{item.description}</Text>
+
+                {item.actionLabel && (
+                  <View style={styles.actionRow}>
+                    <Text style={styles.actionBtnText}>{item.actionLabel} →</Text>
+                  </View>
+                )}
+              </View>
+            </Pressable>
+          )}
+        />
+      )}
     </SafeAreaView>
   );
 }

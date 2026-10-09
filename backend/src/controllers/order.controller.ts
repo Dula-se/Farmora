@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { OrderModel } from '../models/Order.js';
+import { NotificationController } from './notification.controller.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
 export class OrderController {
@@ -80,6 +81,35 @@ export class OrderController {
         expectedDelivery,
         notes: notes || '',
       });
+
+      // ── Notification: Notify Farmer and Buyer about new order ────────────
+      const itemSummary = items.map((i: any) => `${i.quantity || 1}${i.unit || 'kg'} ${i.title || 'produce'}`).join(', ');
+
+      // 1. Notify the farmer that a new order has been received
+      if (resolvedFarmerId) {
+        NotificationController.createNotification({
+          userId: resolvedFarmerId,
+          title: `📦 New Order Placed: #${orderNumber}`,
+          description: `${buyerName || 'Buyer'} placed an order for ${itemSummary}. Total: Rs. ${(totalAmount || subtotal || 0).toLocaleString()}. Tap to view dispatch details.`,
+          type: 'order',
+          data: { orderId: order._id.toString(), orderNumber, buyerId: resolvedBuyerId },
+          actionLabel: 'View Order',
+          actionRoute: 'farmer-orders',
+        }).catch(() => {});
+      }
+
+      // 2. Notify the buyer confirming the order placement
+      if (resolvedBuyerId) {
+        NotificationController.createNotification({
+          userId: resolvedBuyerId,
+          title: `✅ Order Confirmed: #${orderNumber}`,
+          description: `Your order for ${itemSummary} from ${farmerName || 'Govigedara Farm'} has been confirmed. Expected delivery: ${expectedDelivery}. Security PIN: ${securityPin}.`,
+          type: 'order',
+          data: { orderId: order._id.toString(), orderNumber, trackingNumber },
+          actionLabel: 'Track Delivery',
+          actionRoute: 'order-tracking',
+        }).catch(() => {});
+      }
 
       return sendSuccess(res, order, 'Order placed successfully.');
     } catch (err: any) {

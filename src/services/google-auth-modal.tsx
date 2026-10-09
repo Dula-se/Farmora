@@ -11,6 +11,7 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { ApiUser, getAuthToken } from './api';
 import { signInWithRealGoogleAccount } from './firebase-google-auth';
+import { sendLocalNotification } from './notifications';
 
 export interface GoogleAuthModalProps {
   visible: boolean;
@@ -42,6 +43,10 @@ export function GoogleAuthModal({
       const token = (await getAuthToken()) || '';
       onSuccess(user, token);
       onClose();
+      sendLocalNotification(
+        '🔐 Security Alert: Google Sign-in',
+        `Someone signed into your Farmora account (${user?.fullName || 'User'}) with Google.`
+      ).catch(() => {});
     } catch (err: any) {
       console.warn('[Google Auth] Sign-in notice:', err.message);
       setErrorMsg(err.message || 'Could not complete Google sign-in.');
