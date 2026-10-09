@@ -69,7 +69,7 @@ interface ChatConversationScreenProps {
   productTitle?: string;
   productImage?: string;
   onBack: () => void;
-  onStartAudioCall: (name: string, avatar: string) => void;
+  onStartAudioCall: (name: string, avatar: string, phone?: string) => void;
   onStartVideoCall: (name: string, avatar: string) => void;
   onRequestInspection?: () => void;
   onRateUser?: (userId: string, userName: string, userAvatar: string, role: 'farmer' | 'buyer') => void;
@@ -101,6 +101,7 @@ export function ChatConversationScreen({
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showLocalScheduleModal, setShowLocalScheduleModal] = useState(false);
   const [liveOtherAvatar, setLiveOtherAvatar] = useState<string>('');
+  const [liveOtherMobile, setLiveOtherMobile] = useState<string>('');
 
   // Edit & Delete message actions
   const [selectedMsgForAction, setSelectedMsgForAction] = useState<FirestoreMessage | null>(null);
@@ -168,8 +169,10 @@ export function ChatConversationScreen({
           if (targetUid) {
             try {
               const uSnap = await getDoc(doc(db, 'users', targetUid));
-              if (uSnap.exists() && uSnap.data()?.avatarUrl) {
-                setLiveOtherAvatar(uSnap.data().avatarUrl);
+              if (uSnap.exists()) {
+                const uData = uSnap.data();
+                if (uData?.avatarUrl) setLiveOtherAvatar(uData.avatarUrl);
+                if (uData?.mobileNumber) setLiveOtherMobile(uData.mobileNumber);
               }
             } catch {}
           }
@@ -189,8 +192,16 @@ export function ChatConversationScreen({
           const cData = res.data;
           setConvMeta(cData);
           const targetUid = otherUserId || cData.participants?.find((p: string) => p !== (user?.id || user?._id));
-          if (targetUid && cData.participantAvatars?.[targetUid]) {
-            setLiveOtherAvatar(cData.participantAvatars[targetUid]);
+          if (targetUid) {
+            if (cData.participantAvatars?.[targetUid]) {
+              setLiveOtherAvatar(cData.participantAvatars[targetUid]);
+            }
+            try {
+              const uRes = await apiFetch<any>(`/users/${targetUid}`);
+              if (uRes?.data?.mobileNumber) {
+                setLiveOtherMobile(uRes.data.mobileNumber);
+              }
+            } catch {}
           }
         }
       } catch {}
@@ -1088,7 +1099,7 @@ export function ChatConversationScreen({
         </View>
 
         <View style={styles.headerActions}>
-          <Pressable style={styles.headerIconBtn} onPress={() => onStartAudioCall(participantName, participantAvatar)}>
+          <Pressable style={styles.headerIconBtn} onPress={() => onStartAudioCall(participantName, participantAvatar, liveOtherMobile)}>
             <Text style={{ fontSize: 17 }}>📞</Text>
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={handleInitiateVideoCall}>

@@ -7,17 +7,21 @@ import {
   Text,
   View,
   Animated,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { ChatService } from '@/services/chat-service';
 import { FirestoreChatService, FirestoreCallSession } from '@/services/firestore-chat-service';
-import { getStoredUser } from '@/services/api';
+import { getStoredUser, apiFetch } from '@/services/api';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/config/firebase';
 
 interface VoiceCallScreenProps {
   visible: boolean;
   participantName: string;
   participantAvatar?: string;
+  participantPhone?: string;
   conversationId?: string;
   otherUserId?: string;
   callId?: string;
@@ -30,6 +34,7 @@ export function VoiceCallScreen({
   visible,
   participantName,
   participantAvatar,
+  participantPhone,
   conversationId,
   otherUserId,
   callId: propCallId,
@@ -46,7 +51,39 @@ export function VoiceCallScreen({
   const [remoteMuted, setRemoteMuted] = useState(false);
   const [activeCallId, setActiveCallId] = useState<string | null>(propCallId || null);
 
+  // Phone number & 10s countdown to native mobile keypad
+  const [phoneNumber, setPhoneNumber] = useState<string>(participantPhone || '');
+  const [dialCountdown, setDialCountdown] = useState<number>(10);
+
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const hasTriggeredDialerRef = useRef(false);
+
+  // Fetch real farmer mobile number if not passed in props
+  useEffect(() => {
+    if (participantPhone) {
+      setPhoneNumber(participantPhone);
+      return;
+    }
+    if (otherUserId) {
+      // 1. Try Firestore
+      getDoc(doc(db, 'users', otherUserId))
+        .then((snap) => {
+          if (snap.exists() && snap.data()?.mobileNumber) {
+            setPhoneNumber(snap.data().mobileNumber);
+          }
+        })
+        .catch(() => {});
+
+      // 2. Try MongoDB backend API
+      apiFetch<any>(`/users/${otherUserId}`)
+        .then((res) => {
+          if (res?.data?.mobileNumber) {
+            setPhoneNumber(res.data.mobileNumber);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [otherUserId, participantPhone]);
 
   // Pulsing animation for calling / ringing state
   useEffect(() => {
@@ -69,6 +106,43 @@ export function VoiceCallScreen({
       return () => loop.stop();
     }
   }, [callStatus, pulseAnim]);
+
+  // Navigate to native phone keypad with the farmer's mobile number pre-pasted
+  const triggerNativeDialer = () => {
+    if (hasTriggeredDialerRef.current) return;
+    hasTriggeredDialerRef.current = true;
+
+    const rawNumber = phoneNumber || '+94771234567';
+    const cleanNumber = rawNumber.replace(/[^0-9+]/g, '');
+
+    Linking.openURL(`tel:${cleanNumber}`).catch((err) => {
+      console.warn('[VoiceCallScreen] Linking.openURL error:', err);
+    });
+
+    // Close the in-app calling screen so returning to app lands cleanly in chat
+    onEndCall();
+  };
+
+  // 10-second automatic countdown to native mobile keypad
+  useEffect(() => {
+    if (!visible || isIncoming || callStatus === 'connected') return;
+
+    hasTriggeredDialerRef.current = false;
+    setDialCountdown(10);
+
+    const interval = setInterval(() => {
+      setDialCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          triggerNativeDialer();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [visible, isIncoming, callStatus, phoneNumber]);
 
   // Initiate call if caller
   useEffect(() => {
@@ -210,6 +284,24 @@ export function VoiceCallScreen({
             {callStatus === 'connected' ? formatTimer(seconds) : 'Connecting inside Famora...'}
           </Text>
 
+          {/* 10s Countdown to Native Phone Keypad Notice */}
+          {callStatus !== 'connected' && !isIncoming && (
+            <View style={styles.dialerNoticeCard}>
+              <View style={styles.dialerBadgeRow}>
+                <View style={styles.dialerPulsingDot} />
+                <Text style={styles.dialerNoticeTitle}>
+                  Switching to Mobile Keypad in {dialCountdown}s
+                </Text>
+              </View>
+              <Text style={styles.dialerNoticePhone}>
+                Farmer: {phoneNumber || '+94 77 123 4567'}
+              </Text>
+              <Pressable style={styles.dialNowBtn} onPress={triggerNativeDialer}>
+                <Text style={styles.dialNowBtnText}>📞 Open Phone Keypad Now</Text>
+              </Pressable>
+            </View>
+          )}
+
           {remoteMuted && (
             <View style={styles.remoteMutedBadge}>
               <Text style={styles.remoteMutedText}>🔇 Remote microphone is muted</Text>
@@ -237,7 +329,7 @@ export function VoiceCallScreen({
             </View>
           </Animated.View>
 
-          {/* Audio Waveform Bars (Active when connected) */}
+          {/* Audio Waveform Bars */}
           <View style={styles.waveformsRow}>
             {[14, 28, 42, 20, 56, 35, 48, 22, 60, 38, 25, 45, 18, 30].map((h, i) => (
               <View
@@ -253,7 +345,7 @@ export function VoiceCallScreen({
           <Text style={styles.audioQualityText}>
             {callStatus === 'connected'
               ? '🟢 Live HD Voice Connected Directly in App'
-              : 'Ringing receiver phone...'}
+              : `Pasting ${phoneNumber || 'number'} to mobile keypad in ${dialCountdown}s...`}
           </Text>
         </View>
 
@@ -305,14 +397,15 @@ const styles = StyleSheet.create({
   },
   topInfo: {
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 14,
+    paddingHorizontal: 20,
   },
   encryptedBadgeWrap: {
     backgroundColor: 'rgba(16, 185, 129, 0.12)',
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 14,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   encryptedBadge: {
     color: '#10B981',
@@ -323,12 +416,60 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     color: '#FFFFFF',
-    marginBottom: 6,
+    marginBottom: 4,
+    textAlign: 'center',
   },
   callTimer: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#94A3B8',
     fontWeight: '600',
+  },
+  dialerNoticeCard: {
+    marginTop: 14,
+    backgroundColor: 'rgba(30, 41, 59, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.35)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 320,
+  },
+  dialerBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  dialerPulsingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#3B82F6',
+  },
+  dialerNoticeTitle: {
+    color: '#60A5FA',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  dialerNoticePhone: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  dialNowBtn: {
+    backgroundColor: '#1E5E3A',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  dialNowBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   remoteMutedBadge: {
     marginTop: 10,
@@ -363,91 +504,88 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   callerAvatar: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#1E5E3A',
   },
   avatarPlaceholder: {
-    backgroundColor: '#1E3A2F',
+    backgroundColor: '#1E5E3A',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#10B981',
   },
   avatarInitialText: {
     color: '#FFFFFF',
-    fontSize: 44,
+    fontSize: 48,
     fontWeight: '800',
   },
   waveformsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
-    height: 65,
-    marginTop: 36,
+    marginTop: 30,
+    height: 60,
   },
   waveBar: {
     width: 4,
-    backgroundColor: '#22C55E',
     borderRadius: 2,
+    backgroundColor: '#10B981',
   },
   audioQualityText: {
     color: '#64748B',
-    fontSize: 13,
-    marginTop: 12,
+    fontSize: 12,
     fontWeight: '600',
+    marginTop: 10,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   controlsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-evenly',
     alignItems: 'center',
     paddingHorizontal: 20,
-    marginBottom: 20,
   },
   controlBtn: {
     alignItems: 'center',
+    justifyContent: 'center',
     width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#1E293B',
   },
   controlBtnActive: {
-    opacity: 0.9,
+    backgroundColor: '#334155',
+    borderWidth: 1.5,
+    borderColor: '#3B82F6',
   },
   controlIcon: {
-    fontSize: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    textAlign: 'center',
-    lineHeight: 56,
-    overflow: 'hidden',
-    color: '#FFFFFF',
+    fontSize: 22,
+    marginBottom: 2,
   },
   controlLabel: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    marginTop: 6,
+    color: '#94A3B8',
+    fontSize: 10,
     fontWeight: '600',
   },
   endCallBtn: {
     alignItems: 'center',
+    justifyContent: 'center',
     width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#EF4444',
   },
   endCallIcon: {
-    fontSize: 26,
-    backgroundColor: '#EF4444',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    textAlign: 'center',
-    lineHeight: 56,
-    overflow: 'hidden',
+    fontSize: 24,
     color: '#FFFFFF',
     transform: [{ rotate: '135deg' }],
   },
   endCallLabel: {
-    color: '#EF4444',
-    fontSize: 12,
-    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 10,
     fontWeight: '700',
+    marginTop: 2,
   },
 });

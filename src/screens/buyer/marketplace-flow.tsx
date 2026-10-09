@@ -138,6 +138,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     visible: boolean;
     name: string;
     avatar: string;
+    phone?: string;
     mode: 'audio' | 'video';
     conversationId?: string;
     otherUserId?: string;
@@ -519,11 +520,12 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             productImage={activeChatMeta.productImage}
             currentRole="buyer"
             onBack={() => setCurrentView(activeTab === 'messages' ? 'messages' : 'home')}
-            onStartAudioCall={(name, avatar) => {
+            onStartAudioCall={(name, avatar, phone) => {
               setActiveCall({
                 visible: true,
                 name,
                 avatar,
+                phone,
                 mode: 'audio',
                 conversationId: activeChatMeta.conversationId,
                 otherUserId: activeChatMeta.otherUserId,
@@ -814,6 +816,7 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          participantPhone={activeCall.phone}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
           callId={activeCall.callId}

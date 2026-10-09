@@ -128,6 +128,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     visible: boolean;
     name: string;
     avatar: string;
+    phone?: string;
     mode: 'audio' | 'video';
     conversationId?: string;
     otherUserId?: string;
@@ -353,11 +354,12 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
             otherUserRole={activeChatMeta.otherUserRole}
             currentRole="farmer"
             onBack={() => setCurrentView('messages')}
-            onStartAudioCall={(name, avatar) => {
+            onStartAudioCall={(name, avatar, phone) => {
               setActiveCall({
                 visible: true,
                 name,
                 avatar,
+                phone,
                 mode: 'audio',
                 conversationId: activeChatMeta.conversationId,
                 otherUserId: activeChatMeta.otherUserId,
@@ -587,6 +589,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           visible={activeCall.visible}
           participantName={activeCall.name}
           participantAvatar={activeCall.avatar}
+          participantPhone={activeCall.phone}
           conversationId={activeCall.conversationId}
           otherUserId={activeCall.otherUserId}
           callId={activeCall.callId}
