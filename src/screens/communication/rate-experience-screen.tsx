@@ -22,6 +22,7 @@ interface RateExperienceScreenProps {
   farmerId?: string;
   farmerName?: string;
   farmerAvatar?: string;
+  initialReview?: RatingReview | null;
   onBack: () => void;
   onSubmitSuccess?: () => void;
 }
@@ -39,25 +40,27 @@ export function RateExperienceScreen({
   farmerId = '',
   farmerName = 'Farmer',
   farmerAvatar = '',
+  initialReview = null,
   onBack,
   onSubmitSuccess,
 }: RateExperienceScreenProps) {
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
-  const [existingReview, setExistingReview] = useState<RatingReview | null>(null);
+  const [existingReview, setExistingReview] = useState<RatingReview | null>(initialReview || null);
   const [loadingInitial, setLoadingInitial] = useState(true);
 
-  const [overallRating, setOverallRating] = useState(5);
-  const [qualityRating, setQualityRating] = useState(5);
-  const [freshnessRating, setFreshnessRating] = useState(5);
-  const [packagingRating, setPackagingRating] = useState(4);
-  const [commRating, setCommRating] = useState(5);
+  const [overallRating, setOverallRating] = useState(initialReview?.overallRating || 5);
+  const [qualityRating, setQualityRating] = useState(initialReview?.criteriaRatings?.quality || 5);
+  const [freshnessRating, setFreshnessRating] = useState(initialReview?.criteriaRatings?.freshness || 5);
+  const [packagingRating, setPackagingRating] = useState(initialReview?.criteriaRatings?.packaging || 4);
+  const [commRating, setCommRating] = useState(initialReview?.criteriaRatings?.communication || 5);
 
-  const [selectedTags, setSelectedTags] = useState<string[]>([
-    'Crisp & Fresh',
-    'Accurate Grading',
-  ]);
-  const [comment, setComment] = useState('');
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>(
+    initialReview?.tags && initialReview.tags.length > 0
+      ? initialReview.tags
+      : ['Crisp & Fresh', 'Accurate Grading']
+  );
+  const [comment, setComment] = useState(initialReview?.comment || '');
+  const [photos, setPhotos] = useState<string[]>(initialReview?.images || []);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -67,7 +70,17 @@ export function RateExperienceScreen({
         const u = await getStoredUser();
         setCurrentUser(u);
         const authorId = u?.id || u?._id || 'user-buyer-1';
-        const found = await RatingService.getMyReviewForTarget(authorId, farmerId);
+
+        let found = initialReview || null;
+        if (!found) {
+          found = await RatingService.getMyReviewForTarget(
+            authorId,
+            farmerId,
+            farmerName,
+            u?.fullName
+          );
+        }
+
         if (found) {
           setExistingReview(found);
           setOverallRating(found.overallRating || 5);
@@ -88,7 +101,7 @@ export function RateExperienceScreen({
       }
     }
     loadData();
-  }, [farmerId]);
+  }, [farmerId, farmerName, initialReview]);
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -241,7 +254,9 @@ export function RateExperienceScreen({
             <Path d="M19 12H5M12 19l-7-7 7-7" />
           </Svg>
         </Pressable>
-        <Text style={styles.headerTitle}>Rate Your Experience</Text>
+        <Text style={styles.headerTitle}>
+          {existingReview ? 'Edit Your Review ⭐' : 'Rate Your Experience'}
+        </Text>
         <View style={{ width: 36 }} />
       </View>
 

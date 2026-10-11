@@ -19,6 +19,7 @@ interface RateBuyerScreenProps {
   buyerId?: string;
   buyerName?: string;
   buyerAvatar?: string;
+  initialReview?: RatingReview | null;
   onBack: () => void;
   onSubmitSuccess?: () => void;
 }
@@ -35,22 +36,24 @@ export function RateBuyerScreen({
   buyerId = 'buyer-sunil',
   buyerName = 'Sunil Dissanayake',
   buyerAvatar = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+  initialReview = null,
   onBack,
   onSubmitSuccess,
 }: RateBuyerScreenProps) {
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
-  const [existingReview, setExistingReview] = useState<RatingReview | null>(null);
+  const [existingReview, setExistingReview] = useState<RatingReview | null>(initialReview || null);
   const [loadingInitial, setLoadingInitial] = useState(true);
 
-  const [overallRating, setOverallRating] = useState(5);
-  const [paymentRating, setPaymentRating] = useState(5);
-  const [commRating, setCommRating] = useState(5);
+  const [overallRating, setOverallRating] = useState(initialReview?.overallRating || 5);
+  const [paymentRating, setPaymentRating] = useState(initialReview?.criteriaRatings?.paymentPromptness || 5);
+  const [commRating, setCommRating] = useState(initialReview?.criteriaRatings?.communication || 5);
   const [pickupRating, setPickupRating] = useState(5);
-  const [selectedTags, setSelectedTags] = useState<string[]>([
-    'Prompt Payment',
-    'Smooth Pickup',
-  ]);
-  const [comment, setComment] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>(
+    initialReview?.tags && initialReview.tags.length > 0
+      ? initialReview.tags
+      : ['Prompt Payment', 'Smooth Pickup']
+  );
+  const [comment, setComment] = useState(initialReview?.comment || '');
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -60,7 +63,17 @@ export function RateBuyerScreen({
         const u = await getStoredUser();
         setCurrentUser(u);
         const authorId = u?.id || u?._id || 'user-farmer-1';
-        const found = await RatingService.getMyReviewForTarget(authorId, buyerId);
+
+        let found = initialReview || null;
+        if (!found) {
+          found = await RatingService.getMyReviewForTarget(
+            authorId,
+            buyerId,
+            buyerName,
+            u?.fullName
+          );
+        }
+
         if (found) {
           setExistingReview(found);
           setOverallRating(found.overallRating || 5);
@@ -78,7 +91,7 @@ export function RateBuyerScreen({
       }
     }
     loadData();
-  }, [buyerId]);
+  }, [buyerId, buyerName, initialReview]);
 
   const toggleTag = (tag: string) => {
     if (selectedTags.includes(tag)) {
@@ -211,7 +224,9 @@ export function RateBuyerScreen({
             <Path d="M19 12H5M12 19l-7-7 7-7" />
           </Svg>
         </Pressable>
-        <Text style={styles.headerTitle}>Rate Buyer</Text>
+        <Text style={styles.headerTitle}>
+          {existingReview ? 'Edit Buyer Rating ⭐' : 'Rate Buyer'}
+        </Text>
         <View style={{ width: 36 }} />
       </View>
 

@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,7 +21,7 @@ import { RatingService, RatingReview } from '@/services/rating-service';
 interface ReviewsScreenProps {
   product: ApiProduceItem;
   onBack: () => void;
-  onWriteReview?: () => void;
+  onWriteReview?: (reviewToEdit?: RatingReview) => void;
 }
 
 export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenProps) {
@@ -28,6 +30,12 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
   const [reviews, setReviews] = useState<RatingReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({});
+
+  // Inline Edit review modal state
+  const [editingReview, setEditingReview] = useState<RatingReview | null>(null);
+  const [editRatingScore, setEditRatingScore] = useState(5);
+  const [editComment, setEditComment] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const targetId = String(product.farmerId || product.id || 'farmer-kusuma');
 
@@ -92,6 +100,30 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
     );
   };
 
+  const handleStartInlineEdit = (rev: RatingReview) => {
+    setEditingReview(rev);
+    setEditRatingScore(rev.overallRating || 5);
+    setEditComment(rev.comment || '');
+  };
+
+  const handleSaveInlineEdit = async () => {
+    if (!editingReview) return;
+    setSavingEdit(true);
+    try {
+      await RatingService.updateReview(editingReview.id, {
+        overallRating: editRatingScore,
+        comment: editComment.trim() || 'Updated review',
+      });
+      Alert.alert('Success ⭐', 'Your review has been updated!');
+      setEditingReview(null);
+      loadAllReviews();
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Could not update review.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const stats = RatingService.computeStats(reviews);
   const averageRating = reviews.length > 0 ? stats.average : 4.8;
   const totalCount = reviews.length > 0 ? stats.count : 0;
@@ -130,9 +162,11 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
         <Text style={styles.headerTitle}>Reviews & Ratings</Text>
         {onWriteReview ? (
           <Pressable
-            onPress={onWriteReview}
+            onPress={() => (myReview ? handleStartInlineEdit(myReview) : onWriteReview())}
             style={{ backgroundColor: '#1E5E3A', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>+ Rate</Text>
+            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+              {myReview ? '✏️ Edit' : '+ Rate'}
+            </Text>
           </Pressable>
         ) : (
           <View style={{ width: 36 }} />
@@ -144,7 +178,13 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
         {onWriteReview && (
           <Pressable
             style={[styles.rateCtaCard, myReview && { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }]}
-            onPress={onWriteReview}>
+            onPress={() => {
+              if (myReview) {
+                handleStartInlineEdit(myReview);
+              } else {
+                onWriteReview();
+              }
+            }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.rateCtaTitle}>
                 {myReview ? 'You Rated This Farmer ⭐' : 'Bought from this farmer?'}
@@ -331,7 +371,7 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <Pressable
                           style={styles.inlineEditBtn}
-                          onPress={onWriteReview}>
+                          onPress={() => handleStartInlineEdit(rev)}>
                           <Text style={styles.inlineEditBtnText}>✏️ Edit</Text>
                         </Pressable>
                         <Pressable
@@ -348,6 +388,90 @@ export function ReviewsScreen({ product, onBack, onWriteReview }: ReviewsScreenP
           )}
         </View>
       </ScrollView>
+
+      {/* Inline Edit Review Modal */}
+      {editingReview && (
+        <Modal
+          visible={true}
+          animationType="fade"
+          transparent={true}
+          onRequestClose={() => setEditingReview(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.editDialogCard}>
+              <Text style={styles.editDialogTitle}>
+                Edit Review for {editingReview.targetName || product.farmerName || 'Farmer'}
+              </Text>
+              <Text style={styles.editDialogSub}>
+                Update your rating score and written comments:
+              </Text>
+
+              {/* Star selector */}
+              <View style={styles.starsSelectRow}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Pressable
+                    key={star}
+                    hitSlop={8}
+                    onPress={() => setEditRatingScore(star)}>
+                    <Text
+                      style={[
+                        styles.dialogStar,
+                        {
+                          color: star <= editRatingScore ? '#EAB308' : '#CBD5E1',
+                        },
+                      ]}>
+                      ★
+                    </Text>
+                  </Pressable>
+                ))}
+                <Text style={styles.dialogStarScore}>
+                  {editRatingScore}.0 / 5.0
+                </Text>
+              </View>
+
+              {/* Comment Input */}
+              <TextInput
+                style={styles.dialogInput}
+                multiline
+                numberOfLines={3}
+                placeholder="Update your review comment..."
+                placeholderTextColor="#94A3B8"
+                value={editComment}
+                onChangeText={setEditComment}
+              />
+
+              {/* Action buttons */}
+              <View style={styles.dialogButtonsRow}>
+                <Pressable
+                  style={styles.dialogCancelBtn}
+                  onPress={() => setEditingReview(null)}>
+                  <Text style={styles.dialogCancelText}>Cancel</Text>
+                </Pressable>
+
+                {onWriteReview && (
+                  <Pressable
+                    style={styles.dialogFullEditBtn}
+                    onPress={() => {
+                      const toEdit = editingReview;
+                      setEditingReview(null);
+                      onWriteReview(toEdit);
+                    }}>
+                    <Text style={styles.dialogFullEditText}>Full Criteria ⚙️</Text>
+                  </Pressable>
+                )}
+
+                <Pressable
+                  style={[styles.dialogSaveBtn, savingEdit && { opacity: 0.7 }]}
+                  disabled={savingEdit}
+                  onPress={handleSaveInlineEdit}>
+                  <Text style={styles.dialogSaveText}>
+                    {savingEdit ? 'Saving...' : 'Save Changes'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -683,5 +807,102 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#E11D48',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  editDialogCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  editDialogTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  editDialogSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  starsSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  dialogStar: {
+    fontSize: 32,
+  },
+  dialogStarScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E5E3A',
+    marginLeft: 6,
+  },
+  dialogInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 13,
+    color: '#0F172A',
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  dialogButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dialogCancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+  },
+  dialogCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  dialogFullEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  dialogFullEditText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  dialogSaveBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#1E5E3A',
+  },
+  dialogSaveText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

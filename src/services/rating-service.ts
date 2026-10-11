@@ -371,11 +371,21 @@ export const RatingService = {
   async getMyReviewForTarget(
     authorId: string,
     targetId: string | string[],
-    targetName?: string
+    targetName?: string,
+    authorName?: string
   ): Promise<RatingReview | null> {
-    if (!authorId) return null;
+    if (!authorId && !authorName) return null;
     const all = await this.fetchReviewsForTarget(targetId, targetName);
-    return all.find((r) => r.authorId === authorId) || null;
+    const normAuthorName = authorName?.trim().toLowerCase();
+    return (
+      all.find((r) => {
+        if (authorId && r.authorId === authorId) return true;
+        if (normAuthorName && r.authorName && r.authorName.trim().toLowerCase() === normAuthorName) {
+          return true;
+        }
+        return false;
+      }) || null
+    );
   },
 
   /**
@@ -422,28 +432,86 @@ export const RatingService = {
   ): Promise<RatingReview> {
     const now = new Date().toISOString();
 
-    // 1. Update in local storage
+    // 1. Look for existing review across local storage, in-memory seed reviews, and Firestore
     const local = await getStoredLocalReviews();
-    let updatedItem: RatingReview | null = null;
-    const nextLocal = local.map((r) => {
-      if (r.id === reviewId) {
-        updatedItem = { ...r, ...updates, updatedAt: now };
-        return updatedItem;
-      }
-      return r;
-    });
+    let existingItem: RatingReview | undefined = local.find((r) => r.id === reviewId);
 
-    if (updatedItem) {
-      await saveStoredLocalReviews(nextLocal);
+    if (!existingItem) {
+      existingItem = SEED_REVIEWS.find((r) => r.id === reviewId);
     }
 
-    // 2. Update in Firestore
+    if (!existingItem) {
+      try {
+        const snap = await getDoc(doc(db, 'reviews', reviewId));
+        if (snap.exists()) {
+          const d = snap.data();
+          existingItem = {
+            id: snap.id,
+            targetId: d.targetId || '',
+            targetName: d.targetName,
+            targetRole: d.targetRole || 'farmer',
+            authorId: d.authorId || '',
+            authorName: d.authorName || 'User',
+            authorRole: d.authorRole || 'buyer',
+            authorAvatar: d.authorAvatar || '',
+            overallRating: d.overallRating || 5,
+            criteriaRatings: d.criteriaRatings || {},
+            tags: d.tags || [],
+            comment: d.comment || '',
+            images: d.images || [],
+            createdAt:
+              d.createdAt instanceof Timestamp
+                ? d.createdAt.toDate().toISOString()
+                : d.createdAt || now,
+            helpfulCount: d.helpfulCount || 0,
+          };
+        }
+      } catch (err) {
+        console.warn('[RatingService] Firestore getDoc error in updateReview:', err);
+      }
+    }
+
+    const updatedItem: RatingReview = existingItem
+      ? {
+          ...existingItem,
+          ...updates,
+          criteriaRatings: {
+            ...(existingItem.criteriaRatings || {}),
+            ...(updates.criteriaRatings || {}),
+          },
+          updatedAt: now,
+        }
+      : {
+          id: reviewId,
+          targetId: '',
+          targetRole: 'farmer',
+          authorId: '',
+          authorName: 'User',
+          authorRole: 'buyer',
+          overallRating: updates.overallRating ?? 5,
+          comment: updates.comment ?? '',
+          createdAt: now,
+          updatedAt: now,
+          ...updates,
+        };
+
+    // Update SEED_REVIEWS in-memory if this was a seed review
+    const seedIndex = SEED_REVIEWS.findIndex((r) => r.id === reviewId);
+    if (seedIndex !== -1) {
+      SEED_REVIEWS[seedIndex] = { ...SEED_REVIEWS[seedIndex], ...updatedItem };
+    }
+
+    // Persist to local storage
+    const nextLocal = [updatedItem, ...local.filter((r) => r.id !== reviewId)];
+    await saveStoredLocalReviews(nextLocal);
+
+    // Persist to Firestore
     try {
       const docRef = doc(db, 'reviews', reviewId);
       await setDoc(
         docRef,
         {
-          ...updates,
+          ...updatedItem,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -452,20 +520,7 @@ export const RatingService = {
       console.warn('[RatingService] Firestore update error:', err);
     }
 
-    return (
-      updatedItem || {
-        id: reviewId,
-        targetId: '',
-        targetRole: 'farmer',
-        authorId: '',
-        authorName: '',
-        authorRole: 'buyer',
-        overallRating: 5,
-        comment: '',
-        createdAt: now,
-        ...updates,
-      }
-    );
+    return updatedItem;
   },
 
   /**
@@ -487,6 +542,12 @@ export const RatingService = {
       }
     } catch {}
 
+    // Also remove from in-memory SEED_REVIEWS
+    const sIdx = SEED_REVIEWS.findIndex((r) => r.id === reviewId);
+    if (sIdx !== -1) {
+      SEED_REVIEWS.splice(sIdx, 1);
+    }
+
     // 2. Remove from Firestore
     try {
       const docRef = doc(db, 'reviews', reviewId);
@@ -499,9 +560,10 @@ export const RatingService = {
   /**
    * Fetch all reviews written by a specific author.
    */
-  async fetchReviewsByAuthor(authorId: string): Promise<RatingReview[]> {
-    if (!authorId) return [];
+  async fetchReviewsByAuthor(authorId: string, authorName?: string): Promise<RatingReview[]> {
+    if (!authorId && !authorName) return [];
     const resultsMap = new Map<string, RatingReview>();
+    const normAuthorName = authorName?.trim().toLowerCase();
 
     let deletedIds: string[] = [];
     try {
@@ -509,48 +571,59 @@ export const RatingService = {
       if (rawDeleted) deletedIds = JSON.parse(rawDeleted);
     } catch {}
 
+    const matchesAuthor = (r: RatingReview) => {
+      if (deletedIds.includes(r.id)) return false;
+      if (authorId && r.authorId === authorId) return true;
+      if (normAuthorName && r.authorName && r.authorName.trim().toLowerCase() === normAuthorName) {
+        return true;
+      }
+      return false;
+    };
+
     // 1. Match seed reviews
-    SEED_REVIEWS.filter((r) => r.authorId === authorId && !deletedIds.includes(r.id)).forEach((r) => {
+    SEED_REVIEWS.filter(matchesAuthor).forEach((r) => {
       resultsMap.set(r.id, r);
     });
 
     // 2. Match local storage reviews
     const local = await getStoredLocalReviews();
-    local.filter((r) => r.authorId === authorId && !deletedIds.includes(r.id)).forEach((r) => {
+    local.filter(matchesAuthor).forEach((r) => {
       resultsMap.set(r.id, r);
     });
 
     // 3. Firestore query
     try {
-      const q = query(collection(db, 'reviews'), where('authorId', '==', authorId));
-      const snap = await getDocs(q);
-      snap.forEach((d) => {
-        if (deletedIds.includes(d.id)) return;
-        const data = d.data();
-        const createdAt =
-          data.createdAt instanceof Timestamp
-            ? data.createdAt.toDate().toISOString()
-            : data.createdAt || new Date().toISOString();
+      if (authorId) {
+        const q = query(collection(db, 'reviews'), where('authorId', '==', authorId));
+        const snap = await getDocs(q);
+        snap.forEach((d) => {
+          if (deletedIds.includes(d.id)) return;
+          const data = d.data();
+          const createdAt =
+            data.createdAt instanceof Timestamp
+              ? data.createdAt.toDate().toISOString()
+              : data.createdAt || new Date().toISOString();
 
-        resultsMap.set(d.id, {
-          id: d.id,
-          targetId: data.targetId,
-          targetName: data.targetName,
-          targetRole: data.targetRole || 'farmer',
-          authorId: data.authorId,
-          authorName: data.authorName || 'User',
-          authorRole: data.authorRole || 'buyer',
-          authorAvatar: data.authorAvatar || '',
-          overallRating: data.overallRating || 5,
-          criteriaRatings: data.criteriaRatings || {},
-          tags: data.tags || [],
-          comment: data.comment || '',
-          images: data.images || [],
-          createdAt,
-          updatedAt: data.updatedAt,
-          helpfulCount: data.helpfulCount || 0,
+          resultsMap.set(d.id, {
+            id: d.id,
+            targetId: data.targetId,
+            targetName: data.targetName,
+            targetRole: data.targetRole || 'farmer',
+            authorId: data.authorId,
+            authorName: data.authorName || 'User',
+            authorRole: data.authorRole || 'buyer',
+            authorAvatar: data.authorAvatar || '',
+            overallRating: data.overallRating || 5,
+            criteriaRatings: data.criteriaRatings || {},
+            tags: data.tags || [],
+            comment: data.comment || '',
+            images: data.images || [],
+            createdAt,
+            updatedAt: data.updatedAt,
+            helpfulCount: data.helpfulCount || 0,
+          });
         });
-      });
+      }
     } catch (e) {
       // offline fallback
     }

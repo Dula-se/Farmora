@@ -75,8 +75,8 @@ export function BuyerProfileScreen({
     try {
       const uId = currentUser.id || currentUser._id || 'user-buyer-1';
       const [given, received] = await Promise.all([
-        RatingService.fetchReviewsByAuthor(uId),
-        RatingService.fetchReviewsForTarget(uId),
+        RatingService.fetchReviewsByAuthor(uId, currentUser.fullName),
+        RatingService.fetchReviewsForTarget(uId, currentUser.fullName),
       ]);
       setGivenReviews(given);
       setReceivedReviews(received);

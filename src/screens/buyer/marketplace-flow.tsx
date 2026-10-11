@@ -42,6 +42,7 @@ import { IncomingCallModal } from '@/components/incoming-call-modal';
 import { FirestoreCallSession } from '@/services/firestore-chat-service';
 import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
 import { RateExperienceScreen } from '../communication/rate-experience-screen';
+import { RatingReview } from '@/services/rating-service';
 import { ReportUserScreen } from '../communication/report-user-screen';
 import { NotificationsScreen } from '../communication/notifications-screen';
 import { NotificationPreferencesScreen } from '../communication/notification-preferences-screen';
@@ -117,7 +118,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
     id: 'kamal-gunawardana',
     name: 'Kamal Gunawardana',
   });
-  const [rateOriginView, setRateOriginView] = useState<'reviews' | 'farmer-public-profile' | 'buyer-orders'>('farmer-public-profile');
+  const [rateOriginView, setRateOriginView] = useState<'reviews' | 'farmer-public-profile' | 'buyer-orders' | 'messages'>('farmer-public-profile');
+  const [reviewToEdit, setReviewToEdit] = useState<RatingReview | null>(null);
 
   // Communication & Call States
   const [activeChatMeta, setActiveChatMeta] = useState<{
@@ -381,7 +383,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
           <ReviewsScreen
             product={selectedProduct}
             onBack={() => setCurrentView('product-detail')}
-            onWriteReview={() => {
+            onWriteReview={(rev) => {
+              setReviewToEdit(rev || null);
               setRateOriginView('reviews');
               setSelectedFarmer({
                 id: selectedProduct.farmerId || (selectedProduct as any)._id || selectedProduct.id || 'farmer-1',
@@ -556,8 +559,15 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             farmerId={selectedFarmer.id}
             farmerName={selectedFarmer.name}
             farmerAvatar={selectedFarmer.avatar}
-            onBack={() => setCurrentView(rateOriginView)}
-            onSubmitSuccess={() => setCurrentView(rateOriginView)}
+            initialReview={reviewToEdit}
+            onBack={() => {
+              setReviewToEdit(null);
+              setCurrentView(rateOriginView);
+            }}
+            onSubmitSuccess={() => {
+              setReviewToEdit(null);
+              setCurrentView(rateOriginView);
+            }}
           />
         )}
 
@@ -702,7 +712,8 @@ export function MarketplaceFlow({ onBackToAuth }: MarketplaceFlowProps) {
             onOpenChat={(f: any) => {
               handleStartChatWithFarmer(f.id, f.name, null, f.avatar || selectedFarmer.avatar);
             }}
-            onRateFarmer={(f) => {
+            onRateFarmer={(f, rev) => {
+              setReviewToEdit(rev || null);
               setRateOriginView('farmer-public-profile');
               setSelectedFarmer({ id: f.id, name: f.name, avatar: f.avatar });
               setCurrentView('rate-experience');

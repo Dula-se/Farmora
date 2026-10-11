@@ -4,12 +4,14 @@ import {
   Alert,
   Image,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,7 +33,7 @@ interface FarmerPublicProfileScreenProps {
   onBack?: () => void;
   onSelectProduce?: (produce: ApiProduceItem) => void;
   onOpenChat?: (farmer: { id: string; name: string; avatar?: string }) => void;
-  onRateFarmer?: (farmer: { id: string; name: string; avatar?: string }) => void;
+  onRateFarmer?: (farmer: { id: string; name: string; avatar?: string }, reviewToEdit?: RatingReview | null) => void;
   onViewOnMap?: (farmer: { id: string; name: string; avatar?: string }) => void;
 }
 
@@ -55,6 +57,12 @@ export function FarmerPublicProfileScreen({
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
   const [reviews, setReviews] = useState<RatingReview[]>([]);
   const [myReview, setMyReview] = useState<RatingReview | null>(null);
+
+  // Inline Edit review modal state
+  const [editingReview, setEditingReview] = useState<RatingReview | null>(null);
+  const [editRatingScore, setEditRatingScore] = useState(5);
+  const [editComment, setEditComment] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -80,6 +88,30 @@ export function FarmerPublicProfileScreen({
       setMyReview(found || null);
     } catch (err) {
       console.warn('Error loading farmer reviews:', err);
+    }
+  };
+
+  const handleStartInlineEdit = (rev: RatingReview) => {
+    setEditingReview(rev);
+    setEditRatingScore(rev.overallRating || 5);
+    setEditComment(rev.comment || '');
+  };
+
+  const handleSaveInlineEdit = async () => {
+    if (!editingReview) return;
+    setSavingEdit(true);
+    try {
+      await RatingService.updateReview(editingReview.id, {
+        overallRating: editRatingScore,
+        comment: editComment.trim() || 'Updated review',
+      });
+      Alert.alert('Success ⭐', 'Your review has been updated!');
+      setEditingReview(null);
+      loadFarmerReviews();
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Could not update review.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -494,13 +526,17 @@ export function FarmerPublicProfileScreen({
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text style={styles.sectionHeader}>VERIFIED REVIEWS ({reviews.length})</Text>
             <Pressable
-              onPress={() =>
-                onRateFarmer?.({
-                  id: farmerId,
-                  name: profile?.fullName || farmerName,
-                  avatar: farmerAvatar || profile?.avatarUrl,
-                })
-              }
+              onPress={() => {
+                if (myReview) {
+                  handleStartInlineEdit(myReview);
+                } else if (onRateFarmer) {
+                  onRateFarmer({
+                    id: farmerId,
+                    name: profile?.fullName || farmerName,
+                    avatar: farmerAvatar || profile?.avatarUrl,
+                  });
+                }
+              }}
               style={{
                 backgroundColor: myReview ? '#EFF6FF' : '#1E5E3A',
                 borderWidth: myReview ? 1 : 0,
@@ -607,13 +643,7 @@ export function FarmerPublicProfileScreen({
                           paddingVertical: 5,
                           borderRadius: 8,
                         }}
-                        onPress={() =>
-                          onRateFarmer?.({
-                            id: farmerId,
-                            name: profile?.fullName || farmerName,
-                            avatar: farmerAvatar || profile?.avatarUrl,
-                          })
-                        }>
+                        onPress={() => handleStartInlineEdit(rev)}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8' }}>
                           ✏️ Edit Rating
                         </Text>
@@ -640,6 +670,97 @@ export function FarmerPublicProfileScreen({
           )}
         </View>
       </ScrollView>
+
+      {/* Inline Edit Review Modal */}
+      {editingReview && (
+        <Modal
+          visible={true}
+          animationType="fade"
+          transparent={true}
+          onRequestClose={() => setEditingReview(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.editDialogCard}>
+              <Text style={styles.editDialogTitle}>
+                Edit Rating for {profile?.fullName || farmerName}
+              </Text>
+              <Text style={styles.editDialogSub}>
+                Update your star score and feedback comment:
+              </Text>
+
+              {/* Star selector */}
+              <View style={styles.starsSelectRow}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Pressable
+                    key={star}
+                    hitSlop={8}
+                    onPress={() => setEditRatingScore(star)}>
+                    <Text
+                      style={[
+                        styles.dialogStar,
+                        {
+                          color: star <= editRatingScore ? '#EAB308' : '#CBD5E1',
+                        },
+                      ]}>
+                      ★
+                    </Text>
+                  </Pressable>
+                ))}
+                <Text style={styles.dialogStarScore}>
+                  {editRatingScore}.0 / 5.0
+                </Text>
+              </View>
+
+              {/* Comment Input */}
+              <TextInput
+                style={styles.dialogInput}
+                multiline
+                numberOfLines={3}
+                placeholder="Update your review comment..."
+                placeholderTextColor="#94A3B8"
+                value={editComment}
+                onChangeText={setEditComment}
+              />
+
+              {/* Action buttons */}
+              <View style={styles.dialogButtonsRow}>
+                <Pressable
+                  style={styles.dialogCancelBtn}
+                  onPress={() => setEditingReview(null)}>
+                  <Text style={styles.dialogCancelText}>Cancel</Text>
+                </Pressable>
+
+                {onRateFarmer && (
+                  <Pressable
+                    style={styles.dialogFullEditBtn}
+                    onPress={() => {
+                      const toEdit = editingReview;
+                      setEditingReview(null);
+                      onRateFarmer(
+                        {
+                          id: farmerId,
+                          name: profile?.fullName || farmerName,
+                          avatar: farmerAvatar || profile?.avatarUrl,
+                        },
+                        toEdit
+                      );
+                    }}>
+                    <Text style={styles.dialogFullEditText}>Full Criteria ⚙️</Text>
+                  </Pressable>
+                )}
+
+                <Pressable
+                  style={[styles.dialogSaveBtn, savingEdit && { opacity: 0.7 }]}
+                  disabled={savingEdit}
+                  onPress={handleSaveInlineEdit}>
+                  <Text style={styles.dialogSaveText}>
+                    {savingEdit ? 'Saving...' : 'Save Changes'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -1014,5 +1135,102 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: '#334155',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  editDialogCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  editDialogTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  editDialogSub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  starsSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  dialogStar: {
+    fontSize: 32,
+  },
+  dialogStarScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E5E3A',
+    marginLeft: 6,
+  },
+  dialogInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 13,
+    color: '#0F172A',
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  dialogButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dialogCancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+  },
+  dialogCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  dialogFullEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  dialogFullEditText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  dialogSaveBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#1E5E3A',
+  },
+  dialogSaveText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

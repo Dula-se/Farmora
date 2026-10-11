@@ -1451,6 +1451,19 @@ export function ChatConversationScreen({
               { icon: '🌐', title: 'Open Google Meet', sub: 'Create new meeting on meet.google.com', action: () => { setShowActionSheet(false); Linking.openURL('https://meet.google.com/new'); } },
               { icon: '📅', title: 'Schedule Video Call (Cal.com)', sub: 'Book live farm inspection via Cal.com scheduler', action: () => { setShowActionSheet(false); onRequestInspection ? onRequestInspection() : setShowLocalScheduleModal(true); } },
               { icon: '💰', title: 'Make Price Offer', sub: 'Negotiate direct bulk farm gate price', action: () => { setShowActionSheet(false); setShowOfferModal(true); } },
+              ...(onRateUser
+                ? [
+                    {
+                      icon: '⭐',
+                      title: currentRole === 'buyer' ? 'Rate / Edit Farmer Review' : 'Rate / Edit Buyer Review',
+                      sub: 'Update scores, produce criteria, and commercial rating',
+                      action: () => {
+                        setShowActionSheet(false);
+                        onRateUser(otherUserId || '', participantName, liveOtherAvatar || otherUserAvatar || '', otherUserRole);
+                      },
+                    },
+                  ]
+                : []),
               { icon: '🎙️', title: 'Attach Audio / Voice Note', sub: 'Send audio note file from device', action: () => { setShowActionSheet(false); handlePickAndSendAudio(); } },
               { icon: '🖼️', title: 'Send Photo from Gallery', sub: 'Attach produce photos', action: () => handleSendPhoto('gallery') },
               { icon: '📍', title: 'Share Farm Location', sub: 'Send coordinates for collection', action: () => { setShowActionSheet(false); handleSendText('📍 Shared Location: Please check my farm coordinates on the map.'); } },

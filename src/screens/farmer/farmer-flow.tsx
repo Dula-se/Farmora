@@ -35,6 +35,7 @@ import { VideoCallScreen } from '../communication/video-call-screen';
 import { IncomingCallModal } from '@/components/incoming-call-modal';
 import { ScheduleInspectionModal } from '../communication/schedule-inspection-modal';
 import { RateBuyerScreen } from '../communication/rate-buyer-screen';
+import { RatingReview } from '@/services/rating-service';
 import { ReportUserScreen } from '../communication/report-user-screen';
 import { NotificationsScreen } from '../communication/notifications-screen';
 import { NotificationPreferencesScreen } from '../communication/notification-preferences-screen';
@@ -124,6 +125,7 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
     id: '',
     name: '',
   });
+  const [buyerReviewToEdit, setBuyerReviewToEdit] = useState<RatingReview | null>(null);
   const [activeCall, setActiveCall] = useState<{
     visible: boolean;
     name: string;
@@ -388,8 +390,15 @@ export function FarmerFlow({ onBackToAuth }: FarmerFlowProps) {
           <RateBuyerScreen
             buyerId={activeBuyerForRating.id}
             buyerName={activeBuyerForRating.name}
-            onBack={() => setCurrentView('orders')}
-            onSubmitSuccess={() => setCurrentView('orders')}
+            initialReview={buyerReviewToEdit}
+            onBack={() => {
+              setBuyerReviewToEdit(null);
+              setCurrentView('orders');
+            }}
+            onSubmitSuccess={() => {
+              setBuyerReviewToEdit(null);
+              setCurrentView('orders');
+            }}
           />
         )}
 
